@@ -1,0 +1,29 @@
+# 凭据和本地环境配置
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.pfx
+*.p12
+credentials.json
+secrets.json
+
+# 依赖、缓存和生成文件
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+dist/
+build/
+coverage/
+*.log
+
+# 本机编辑器和系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
