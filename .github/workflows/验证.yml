@@ -1,0 +1,23 @@
+name: 中文桌面应用构建与验证
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Windows 构建与功能验证
+    runs-on: windows-latest
+    steps:
+      - name: 获取代码
+        uses: actions/checkout@v4
+      - name: 准备 .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: 锁定依赖还原
+        run: dotnet restore NetOpsStudio.slnx --locked-mode
+      - name: 构建桌面应用
+        run: dotnet build NetOpsStudio.slnx -c Release --no-restore
+      - name: 验证配置引擎、存储与 AI 协议
+        run: dotnet run --project tests/NetOps.Tests -c Release --no-build

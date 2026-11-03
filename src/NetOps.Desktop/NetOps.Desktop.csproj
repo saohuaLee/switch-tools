@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>NetOpsStudio</AssemblyName>
+    <Product>网络运维工作台</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../NetOps.Infrastructure/NetOps.Infrastructure.csproj" /></ItemGroup>
+</Project>

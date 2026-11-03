@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><ProjectReference Include="../NetOps.Domain/NetOps.Domain.csproj" /></ItemGroup>
+</Project>

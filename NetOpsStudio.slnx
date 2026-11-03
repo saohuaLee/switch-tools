@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/应用/">
+    <Project Path="src/NetOps.Domain/NetOps.Domain.csproj" />
+    <Project Path="src/NetOps.Application/NetOps.Application.csproj" />
+    <Project Path="src/NetOps.Infrastructure/NetOps.Infrastructure.csproj" />
+    <Project Path="src/NetOps.Desktop/NetOps.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/验证/">
+    <Project Path="tests/NetOps.Tests/NetOps.Tests.csproj" />
+  </Folder>
+</Solution>

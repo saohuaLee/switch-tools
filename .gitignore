@@ -27,3 +27,16 @@ coverage/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# .NET 与本地工作区
+**/bin/
+**/obj/
+.vs/
+artifacts/
+*.user
+*.suo
+*.db
+*.db-*
+*.sqlite*
+*.dpapi
+TestResults/
