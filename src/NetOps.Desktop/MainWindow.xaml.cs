@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--qa")) Title = "网络运维工作台 · 浅色独立验收 0.3";
+        if (args.Contains("--qa")) Title = "网络运维工作台 · 交互重构独立验收 0.4";
         var index = Array.IndexOf(args, "--workspace");
         var root = index >= 0 && args.Length > index + 1 ? Path.GetFullPath(args[index + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetOpsStudio", "data");
         workspaceRoot = root;
@@ -44,7 +44,10 @@ public partial class MainWindow : Window
         Closed += (_, _) => { refreshTimer.Stop(); viewModel.Dispose(); http.Dispose(); };
     }
     private void OpenQueueClick(object sender, RoutedEventArgs e) => viewModel.Page = 4;
-    private void BackToDevicesClick(object sender, RoutedEventArgs e) => viewModel.DeviceFocused = false;
+    private void DeviceActionsClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } button) { menu.PlacementTarget = button; menu.IsOpen = true; }
+    }
     private void DeviceRowDoubleClick(object sender, MouseButtonEventArgs e)
     { if (sender is DataGrid { SelectedItem: DeviceHealthRow row } && e.OriginalSource is DependencyObject source && FindParent<DataGridRow>(source) is not null) viewModel.OpenDevice.Execute(row); }
     private static T? FindParent<T>(DependencyObject? current) where T : DependencyObject

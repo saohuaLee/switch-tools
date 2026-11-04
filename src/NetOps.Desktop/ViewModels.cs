@@ -190,9 +190,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private int section;
     public int Section { get => section; set { if (Set(ref section, value) && value != 1) EditorOpen = false; } }
     private string search = "";
-    public string Search { get => search; set { Set(ref search, value); Changed(nameof(FilteredDevices)); Changed(nameof(FilteredDeviceRows)); } }
+    public string Search { get => search; set { Set(ref search, value); Changed(nameof(FilteredDevices)); NotifyDeviceFilter(); } }
     public IEnumerable<Device> FilteredDevices => Devices.Where(d => !d.Archived && $"{d.Name} {d.ManagementIp} {d.VendorLabel} {d.Location}".Contains(Search, StringComparison.OrdinalIgnoreCase));
-    public string DeviceSummary => SelectedDevice is null ? "请选择设备" : $"{SelectedDevice.VendorLabel} · {SelectedDevice.Model} · {SelectedDevice.ManagementIp} · {SelectedDevice.ModeLabel}";
+    public string DeviceSummary => SelectedDevice is null ? "请选择设备" : $"{SelectedDevice.VendorLabel} · {SelectedDevice.Model} · {SelectedDevice.ManagementIp} · {SelectedDevice.Location}";
     public string CapabilityHint => SelectedDevice is null ? "请先选择设备。" : SelectedDevice.Role != DeviceRole.Switch ? "此角色支持连接与高级终端；三层和防火墙图形化配置按原方案列入 P1。" : SelectedDevice.Vendor is not (Vendor.Huawei or Vendor.H3C or Vendor.Cisco or Vendor.Ruijie) ? "此厂商当前提供通用会话接入，图形化配置驱动待适配。" : !CanConfigure ? "请先读取当前配置，建立可审核的端口与 VLAN 基线。" : "已建立配置基线；仅提交实际编辑的字段。";
     public bool SupportsConfiguration => SelectedDevice?.Role == DeviceRole.Switch && SelectedDevice.Vendor is Vendor.Huawei or Vendor.H3C or Vendor.Cisco or Vendor.Ruijie;
     public bool CanConfigure => SupportsConfiguration && SelectedDevice is not null && prepared.Contains(SelectedDevice.Id) && (SelectedDevice.IsSimulation || (SelectedConnection?.Protocol == ConnectionProtocol.Ssh && preparedConnection.GetValueOrDefault(SelectedDevice.Id) == SelectedConnection.Id));
@@ -213,7 +213,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool isApplying;
     public bool IsApplying { get => isApplying; private set { Set(ref isApplying, value); RefreshAll(); } }
     private string operation = "";
-    public string Operation { get => operation; private set => Set(ref operation, value); }
+    public string Operation { get => operation; private set { Set(ref operation, value); Changed(nameof(ConnectionStage)); Changed(nameof(NextStepHint)); } }
     private string connectionOutput = "尚未读取设备。";
     public string ConnectionOutput { get => connectionOutput; set => Set(ref connectionOutput, value); }
 
@@ -314,7 +314,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string PlanTitle => plan is null ? "变更审核" : $"{SelectedDevice?.Name} · {plan.Differences.Length} 项变更";
     public bool IsLivePlan => plan?.IsSimulation == false;
     private bool reviewOpen;
-    public bool ReviewOpen { get => reviewOpen; set => Set(ref reviewOpen, value); }
+    public bool ReviewOpen { get => reviewOpen; set { Set(ref reviewOpen, value); RefreshWorkbenchCommands(); } }
     private bool planConfirmed, liveRiskAccepted, saveAfterVerify = true;
     public bool PlanConfirmed { get => planConfirmed; set { Set(ref planConfirmed, value); RefreshCommands(); } }
     public bool LiveRiskAccepted { get => liveRiskAccepted; set { Set(ref liveRiskAccepted, value); RefreshCommands(); } }
@@ -374,7 +374,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         loading = false; RestoreDraft(); RefreshHistory(); Changed(nameof(MembershipRows)); RefreshAll();
     }
-    public void RefreshWorkspace() { var id = SelectedDevice?.Id; Devices.Clear(); foreach (var d in workspace.GetDevices()) Devices.Add(d); selectedDevice = null; SelectedDevice = Devices.FirstOrDefault(d => d.Id == id && !d.Archived) ?? Devices.FirstOrDefault(d => !d.Archived); Changed(nameof(FilteredDevices)); }
+    public void RefreshWorkspace() { var id = SelectedDevice?.Id; Devices.Clear(); foreach (var d in workspace.GetDevices()) Devices.Add(d); selectedDevice = null; SelectedDevice = Devices.FirstOrDefault(d => d.Id == id && !d.Archived) ?? Devices.FirstOrDefault(d => !d.Archived); Changed(nameof(FilteredDevices)); RefreshObservability(); }
     public void SaveDevice(Device device, string username, string password, string privateKey, ConnectionProfile profile, bool replaceSecret)
     {
         profile.Validate(); device = device with { Connections = [profile] }; device.Validate(); var old = workspace.GetDevices().SingleOrDefault(d => d.Id == device.Id);
@@ -398,7 +398,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         workspace.ImportDevices(devices);
         RefreshWorkspace(); Status = $"已导入 {devices.Count} 台设备，未自动连接。"; return devices.Count;
     }
-    public void ArchiveSelected() { var d = RequireDevice(); if (TerminalConnected || Busy) throw new InvalidOperationException("请先结束当前设备操作。"); workspace.SaveDevice(d with { Archived = true }); prepared.Remove(d.Id); drafts.Remove(d.Id); RefreshWorkspace(); Status = "设备已归档，备份与审计仍保留。"; }
+    public void ArchiveSelected() { var d = RequireDevice(); if (TerminalConnected || Busy) throw new InvalidOperationException("请先结束当前设备操作。"); workspace.SaveDevice(d with { Archived = true }); prepared.Remove(d.Id); drafts.Remove(d.Id); RefreshWorkspace(); ReturnToDevices(); Status = "设备已归档，备份与审计仍保留。"; }
     private async Task ReadCurrentAsync()
     {
         var device = RequireDevice(); var profile = RequireProfile();
@@ -539,6 +539,6 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private static string Error(Exception ex) => ex is ArgumentException or InvalidOperationException or NotSupportedException ? ex.Message : "操作未完成，请检查连接、认证、权限或设备兼容性。敏感原文未写入日志。";
     private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); }
     private void RefreshAll()
-    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans) }) Changed(name); RefreshCommands(); }
+    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(ReadCurrentLabel), nameof(NextStepHint), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans) }) Changed(name); RefreshCommands(); }
     public void Dispose() { operationCancellation?.Cancel(); terminalCancellation?.Cancel(); if (terminal is not null) _ = terminal.DisposeAsync(); }
 }

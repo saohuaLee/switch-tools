@@ -21,6 +21,54 @@ public static class WorkflowChecks
         using var http = new HttpClient(new HttpStub(_ => new(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"测试\"}") }));
         var factory = new FakeFactory(_ => ""); var network = new NetworkOperations(db, drivers, factory, vault, http); var deferredAi = new DeferredAi();
         using var vm = new MainViewModel(db, vault, drivers, deferredAi, factory, network);
+        using (var navigation = new MainViewModel(db, vault, drivers, deferredAi, factory, network))
+        {
+            test("设备中心导航始终返回列表，返回保留筛选和配置草稿", () =>
+            {
+                var target = navigation.SelectedDevice!;
+                navigation.Search = target.Name; navigation.DeviceGroup = target.Location;
+                navigation.OpenDevice.Execute(target.Id); navigation.ReadCurrent.Execute(null);
+                navigation.Ports[0].Picked = true; navigation.PortDescription = "返回后保留的草稿"; navigation.EditPorts.Execute(null);
+                Check(navigation.IsDeviceWorkspace && navigation.BackToDevices.CanExecute(null));
+                navigation.BackToDevices.Execute(null);
+                Check(navigation.Page == 2 && !navigation.DeviceFocused && !navigation.EditorOpen);
+                Check(navigation.Search == target.Name && navigation.DeviceGroup == target.Location && navigation.FilteredDeviceRows.Single().Device.Id == target.Id);
+                navigation.OpenDevice.Execute(target.Id);
+                Check(navigation.CanConfigure && navigation.Ports[0].Picked && navigation.ApplyDescription && navigation.PortDescription == "返回后保留的草稿");
+                navigation.Navigate.Execute("2"); Check(!navigation.DeviceFocused && !navigation.BackToDevices.CanExecute(null));
+                navigation.OpenDevice.Execute(target.Id); navigation.Navigate.Execute("0"); Check(!navigation.IsDeviceWorkspace);
+                navigation.Navigate.Execute("2"); Check(navigation.PageTitle == "设备中心" && !navigation.DeviceFocused);
+            });
+            test("设备关键词与分组组合筛选支持空结果和清除", () =>
+            {
+                var target = navigation.SelectedDevice!; navigation.ClearDeviceFilter.Execute(null);
+                navigation.Search = " " + target.Model.ToLowerInvariant() + " "; navigation.DeviceGroup = target.Location;
+                Check(navigation.FilteredDeviceRows.Any(r => r.Device.Id == target.Id));
+                navigation.Search = "不存在的设备-唯一关键词"; Check(!navigation.HasFilteredDevices && navigation.DeviceCountLabel.StartsWith("显示 0 /"));
+                navigation.RefreshObservability(); Check(!navigation.HasFilteredDevices && navigation.Search.Contains("唯一关键词"));
+                navigation.ClearDeviceFilter.Execute(null); Check(navigation.FilteredDeviceRows.Count() == navigation.DeviceRows.Count && navigation.DeviceGroup == "全部分组");
+            });
+            test("本机审核入口定位当前设备，返回后待提交变更不丢失", () =>
+            {
+                var target = navigation.SelectedDevice!; navigation.OpenDevice.Execute(target.Id);
+                navigation.Stage(new(Ports: [navigation.Ports[0].State.Name], Description: "本机待提交验证"), "本机描述");
+                var first = navigation.PendingChanges.Single(); navigation.OpenDevice.Execute(navigation.Devices[1].Id); navigation.ReadCurrent.Execute(null);
+                Check(navigation.DevicePendingCount == 0 && !navigation.OpenDeviceQueue.CanExecute(null));
+                navigation.Stage(new(Ports: [navigation.Ports[0].State.Name], Description: "另一设备描述"), "其他设备描述");
+                navigation.OpenDevice.Execute(target.Id); Check(navigation.DevicePendingCount == 1 && navigation.HasPendingChanges);
+                navigation.BackToDevices.Execute(null); Check(navigation.PendingChanges.Count == 2);
+                navigation.OpenDevice.Execute(target.Id); navigation.OpenDeviceQueue.Execute(null);
+                Check(navigation.Page == 4 && navigation.SelectedPending == first && navigation.SelectedDevice!.Id == target.Id);
+                foreach (var item in navigation.PendingChanges.ToArray()) navigation.RemovePending.Execute(item);
+                Check(!navigation.HasPendingChanges && navigation.DevicePendingCount == 0 && !navigation.OpenDeviceQueue.CanExecute(null));
+            });
+            test("审核弹层打开时返回快捷命令不穿透", () =>
+            {
+                navigation.OpenDevice.Execute(device.Id); navigation.ReviewOpen = true;
+                Check(!navigation.BackToDevices.CanExecute(null)); navigation.BackToDevices.Execute(null); Check(navigation.DeviceFocused);
+                navigation.ReviewOpen = false; Check(navigation.BackToDevices.CanExecute(null)); navigation.BackToDevices.Execute(null);
+            });
+        }
         test("按正常配置步骤先读取基线", () => { Check(!vm.CanConfigure); Check(!vm.PreviewPorts.CanExecute(null)); vm.ReadCurrent.Execute(null); Check(vm.CanConfigure); Check(vm.Ports.Count == 24); });
         test("单端口表单读取原值，默认不修改字段", () => { vm.Ports[0].Picked = true; Check(vm.Pvid == "10"); Check(vm.PortDescription == "Office-01"); Check(vm.ModifiedFieldCount == 0); Check(!vm.CanPreviewPorts); });
         test("直接编辑中文描述自动勾选，可取消并保留原描述", () => { vm.PortDescription = "财务室 / 打印机（备用）"; Check(vm.ApplyDescription && vm.CanPreviewPorts); Check(vm.BuildPortRequest().Description == "财务室 / 打印机（备用）"); vm.ApplyDescription = false; Check(vm.BuildPortRequest().Description is null); });

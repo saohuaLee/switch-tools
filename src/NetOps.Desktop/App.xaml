@@ -76,6 +76,75 @@
       <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="Foreground" Value="#2563EB" />
     </Style>
+    <Style x:Key="BackButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#EAF2FF" />
+      <Setter Property="BorderBrush" Value="#B5CDFB" />
+      <Setter Property="Foreground" Value="#1D4ED8" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="MinWidth" Value="150" />
+      <Setter Property="Padding" Value="16,10" />
+    </Style>
+    <Style x:Key="QueueButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding HasPendingChanges}" Value="True">
+          <Setter Property="Background" Value="#2563EB" />
+          <Setter Property="BorderBrush" Value="#2563EB" />
+          <Setter Property="Foreground" Value="White" />
+          <Setter Property="FontWeight" Value="SemiBold" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="WorkspaceTab" TargetType="TabItem">
+      <Setter Property="Padding" Value="15,11" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="Surface" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="2,0">
+              <ContentPresenter x:Name="Label" ContentSource="Header" TextElement.Foreground="#64748B" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#F1F5F9" /></Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Surface" Property="Background" Value="#EAF2FF" />
+                <Setter TargetName="Label" Property="TextElement.Foreground" Value="#1D4ED8" />
+                <Setter TargetName="Label" Property="TextElement.FontWeight" Value="SemiBold" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#2563EB" /><Setter TargetName="Surface" Property="BorderThickness" Value="1" /></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="WorkspaceTabs" TargetType="TabControl">
+      <Setter Property="ItemContainerStyle" Value="{StaticResource WorkspaceTab}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabControl">
+            <Grid KeyboardNavigation.TabNavigation="Local">
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /></Grid.RowDefinitions>
+              <Border Background="White" BorderBrush="#E3E8EF" BorderThickness="1" CornerRadius="9" Padding="5" Margin="0,0,0,14">
+                <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+              </Border>
+              <ContentPresenter Grid.Row="1" x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" />
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="ContextMenu">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#D8E0EB" />
+      <Setter Property="Padding" Value="6" />
+      <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Padding" Value="12,10" />
+      <Setter Property="Foreground" Value="#334155" />
+      <Setter Property="MinWidth" Value="160" />
+    </Style>
     <Style TargetType="TextBox">
       <Setter Property="Background" Value="White" />
       <Setter Property="Foreground" Value="#172B4D" />
@@ -292,6 +361,7 @@
     </Style>
     <Style x:Key="GridCellText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
       <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="Margin" Value="10,0,8,0" />
     </Style>

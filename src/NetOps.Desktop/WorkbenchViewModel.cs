@@ -20,6 +20,7 @@ public sealed record DeviceHealthRow(Device Device, MonitorSample? Sample, Monit
     public string Name => Device.Name;
     public string Address => Device.ManagementIp;
     public string Vendor => Device.VendorLabel;
+    public string VendorModel => $"{Vendor} · {Device.Model}";
     public string Group => Device.Location;
     public string SourceLabel => Device.IsSimulation ? "模拟设备" : "真实设备";
     public string StatusLabel => Profile?.Maintenance == true ? "维护中" : Profile?.Enabled != true ? "未启用监控" : Sample?.Reachability switch { Reachability.Online => "在线", Reachability.Suspect => "疑似不可达", Reachability.Offline => "管理不可达", Reachability.Maintenance => "维护中", _ => "状态未知" };
@@ -48,7 +49,14 @@ public sealed partial class MainViewModel
 {
     private LocalWorkspace? observability => workspace as LocalWorkspace;
     public ObservableCollection<DeviceHealthRow> DeviceRows { get; } = [];
-    public IEnumerable<DeviceHealthRow> FilteredDeviceRows => DeviceRows.Where(r => $"{r.Name} {r.Address} {r.Vendor} {r.Group}".Contains(Search, StringComparison.OrdinalIgnoreCase));
+    public IEnumerable<DeviceHealthRow> FilteredDeviceRows => DeviceRows.Where(r => $"{r.Name} {r.Address} {r.Vendor} {r.Device.Model} {r.Group}".Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase) && (DeviceGroup == "全部分组" || r.Group == DeviceGroup));
+    private string deviceGroup = "全部分组";
+    public string DeviceGroup { get => deviceGroup; set { if (value is not null && Set(ref deviceGroup, value)) NotifyDeviceFilter(); } }
+    private string[] deviceGroups = ["全部分组"];
+    public string[] DeviceGroups => deviceGroups;
+    public string DeviceCountLabel => $"显示 {FilteredDeviceRows.Count()} / {DeviceRows.Count} 台";
+    public bool HasFilteredDevices => FilteredDeviceRows.Any();
+    private void NotifyDeviceFilter() { Changed(nameof(FilteredDeviceRows)); Changed(nameof(DeviceCountLabel)); Changed(nameof(HasFilteredDevices)); }
     public ObservableCollection<AlarmEvent> AlarmRows { get; } = [];
     public ObservableCollection<PendingChange> PendingChanges { get; } = [];
     public ObservableCollection<MacDraftRow> MacRows { get; } = [];
@@ -59,6 +67,9 @@ public sealed partial class MainViewModel
     private ActionCommand[] workbenchCommands = [];
     public ActionCommand Navigate { get; private set; } = null!;
     public ActionCommand OpenDevice { get; private set; } = null!;
+    public ActionCommand BackToDevices { get; private set; } = null!;
+    public ActionCommand ClearDeviceFilter { get; private set; } = null!;
+    public ActionCommand OpenDeviceQueue { get; private set; } = null!;
     public ActionCommand StagePorts { get; private set; } = null!;
     public ActionCommand StageVlan { get; private set; } = null!;
     public ActionCommand StageMac { get; private set; } = null!;
@@ -76,7 +87,10 @@ public sealed partial class MainViewModel
     public event Action? TopologyChanged;
     private void InitializeWorkbench()
     {
-        Navigate = new(p => Page = int.Parse(p?.ToString() ?? "0"));
+        Navigate = new(p => { var target = int.Parse(p?.ToString() ?? "0"); if (target == 2) ReturnToDevices(); else Page = target; });
+        BackToDevices = new(_ => ReturnToDevices(), () => IsDeviceWorkspace && !ReviewOpen);
+        ClearDeviceFilter = new(_ => { Search = ""; DeviceGroup = "全部分组"; });
+        OpenDeviceQueue = new(_ => { SelectedPending = PendingChanges.FirstOrDefault(p => p.DeviceId == SelectedDevice?.Id); Page = 4; }, () => DevicePendingCount > 0);
         OpenDevice = new(p => { if (p is DeviceHealthRow row) SelectedDevice = Devices.First(d => d.Id == row.Device.Id); else if (p is Guid id) SelectedDevice = Devices.First(d => d.Id == id); Page = 2; DeviceFocused = true; Section = 0; }, () => SelectedDevice is not null && !IsApplying);
         StagePorts = new(_ => Guard(() => { Stage(BuildPortRequest(), $"端口配置 · {Ports.Count(p => p.Picked)} 个端口"); loading = true; ApplyMode = ApplyPvid = ApplyAllowed = ApplyEnabled = ApplyDescription = CreateInlineVlan = false; loading = false; FillCurrentValues(); EditorOpen = false; NotifyQueue(); }), () => CanPreviewPorts && Ready);
         StageVlan = new(_ => Guard(() => Stage(BuildVlanRequest(), VlanAction.Label + " · VLAN " + VlanId)), () => CanConfigure && Ready && VlanValidation.Length == 0);
@@ -91,25 +105,33 @@ public sealed partial class MainViewModel
         StartMonitoring = new(_ => { observability?.RequestCollectorStop(false); CollectorStartRequested?.Invoke(); RefreshObservability(); });
         StopMonitoring = new(_ => { observability?.RequestCollectorStop(true); Status = "已请求停止后台采集，当前结果会保留并在过期后标记。"; });
         RefreshDashboard = new(_ => RefreshObservability());
-        workbenchCommands = [Navigate, OpenDevice, StagePorts, StageVlan, StageMac, StageDeleteMac, ReviewQueue, RemovePending, ResetPortField, AddMacRow, RemoveMacRow, AcknowledgeAlarm, StartMonitoring, StopMonitoring, RefreshDashboard];
+        workbenchCommands = [Navigate, OpenDevice, BackToDevices, ClearDeviceFilter, OpenDeviceQueue, StagePorts, StageVlan, StageMac, StageDeleteMac, ReviewQueue, RemovePending, ResetPortField, AddMacRow, RemoveMacRow, AcknowledgeAlarm, StartMonitoring, StopMonitoring, RefreshDashboard];
         MacRows.CollectionChanged += (_, _) => { InvalidatePlan(); Changed(nameof(MacValidation)); RefreshWorkbenchCommands(); };
-        PropertyChanged += (_, e) => { if (e.PropertyName == nameof(SelectedDevice)) { foreach (var name in new[] { nameof(PageTitle), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(CurrentHealth), nameof(MetricsHint), nameof(MemberHealthRows), nameof(QueueValidation), nameof(AvailableVlans) }) Changed(name); } };
+        PropertyChanged += (_, e) => { if (e.PropertyName == nameof(SelectedDevice)) { foreach (var name in new[] { nameof(PageTitle), nameof(PageSubtitle), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(CurrentHealth), nameof(MetricsHint), nameof(MemberHealthRows), nameof(HasMemberHealth), nameof(QueueValidation), nameof(AvailableVlans), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint) }) Changed(name); } };
         RefreshObservability();
     }
     private void AddRow(string port, string vlan)
     { var row = new MacDraftRow { PortName = port, Vlan = vlan }; row.PropertyChanged += (_, _) => { InvalidatePlan(); Changed(nameof(MacValidation)); RefreshWorkbenchCommands(); }; MacRows.Add(row); }
     private int page;
-    public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); } } }
+    public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } } }
     public string PageTitle => Page switch { 1 => "网络拓扑", 2 => DeviceFocused ? SelectedDevice?.Name ?? "设备工作区" : "设备中心", 3 => "告警与事件", 4 => "待提交变更", 5 => "系统设置", _ => "网络总览" };
-    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "查看当前状态，编辑配置并统一审核提交" : "管理设备、连接和监控配置", 3 => "持续异常、恢复时间和处理记录", 4 => "按设备组织修改，审核后备份、执行与验证", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
+    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "查找设备，进入工作区查看状态或编辑配置", 3 => "持续异常、恢复时间和处理记录", 4 => "按设备组织修改，审核后备份、执行与验证", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
     private bool deviceFocused;
-    public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); } }
+    public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } }
+    public bool IsDeviceWorkspace => Page == 2 && DeviceFocused;
+    private void ReturnToDevices() { EditorOpen = false; AiOpen = false; DeviceFocused = false; Page = 2; }
     private DeviceHealthRow? selectedRow;
     public DeviceHealthRow? SelectedRow { get => selectedRow; set { if (Set(ref selectedRow, value) && value is not null && value.Device.Id != SelectedDevice?.Id) SelectedDevice = Devices.First(d => d.Id == value.Device.Id); } }
     public string[] PortNames => Ports.Select(p => p.State.Name).ToArray();
     public VlanState[] AvailableVlans => ProjectedState()?.Vlans ?? Vlans.ToArray();
     public string ConnectionStage => Busy ? Operation : CanConfigure ? "配置基线已就绪" : SelectedDevice?.IsSimulation == true ? "模拟设备 · 等待读取" : "尚未建立配置基线";
     public string QueueLabel => $"待提交 {PendingChanges.Count} 组";
+    public bool HasPendingChanges => PendingChanges.Count > 0;
+    public int DevicePendingCount => PendingChanges.Count(p => p.DeviceId == SelectedDevice?.Id);
+    public string DeviceQueueLabel => $"审核本机变更（{DevicePendingCount} 组） →";
+    public string ReadCurrentLabel => CanConfigure ? "重新读取配置" : "读取设备配置";
+    public string NextStepHint => Busy ? Operation : !SupportsConfiguration ? CapabilityHint : !CanConfigure ? "下一步：读取设备配置后，可编辑端口、VLAN 和 MAC。" : DevicePendingCount > 0 ? $"本机有 {DevicePendingCount} 组待提交变更，可继续编辑或前往审核。" : "下一步：进入端口、VLAN 或 MAC 页面编辑，修改后统一审核。";
+    public bool HasMemberHealth => MemberHealthRows.Length > 0;
     public string QueueValidation
     {
         get
@@ -188,7 +210,7 @@ public sealed partial class MainViewModel
         ReviewOpen = true; RefreshCommands();
     }
     private void NotifyQueue()
-    { foreach (var name in new[] { nameof(QueueLabel), nameof(QueueValidation), nameof(AvailableVlans), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation) }) Changed(name); RefreshWorkbenchCommands(); }
+    { foreach (var name in new[] { nameof(QueueLabel), nameof(HasPendingChanges), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint), nameof(QueueValidation), nameof(AvailableVlans), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation) }) Changed(name); RefreshWorkbenchCommands(); }
     private void RefreshWorkbenchCommands() { foreach (var command in workbenchCommands) command.Refresh(); }
     public void RefreshObservability()
     {
@@ -202,12 +224,15 @@ public sealed partial class MainViewModel
             DeviceRows.Add(new(device, sample, profile, workspace.GetState(device.Id)?.StackMembers?.Length ?? 0));
         }
         SelectedRow = DeviceRows.FirstOrDefault(r => r.Device.Id == selectedId);
+        var availableGroups = new[] { "全部分组" }.Concat(DeviceRows.Select(r => r.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct().Order()).ToArray();
+        if (!availableGroups.SequenceEqual(deviceGroups)) { deviceGroups = availableGroups; Changed(nameof(DeviceGroups)); if (!deviceGroups.Contains(DeviceGroup)) deviceGroup = "全部分组"; Changed(nameof(DeviceGroup)); }
+        NotifyDeviceFilter();
         var groups = DeviceRows.Select(r => string.IsNullOrWhiteSpace(r.Group) ? "未分组" : r.Group).Distinct().Order().Prepend("全部分组").ToArray();
         if (!groups.SequenceEqual(topologyGroups)) { topologyGroups = groups; Changed(nameof(TopologyGroups)); if (!groups.Contains(TopologyGroup)) topologyGroup = "全部分组"; Changed(nameof(TopologyGroup)); }
         AlarmRows.Clear(); foreach (var alarm in observability.Alarms()) AlarmRows.Add(alarm);
         var collector = observability.Collector(); CollectorLabel = observability.CollectorStopRequested() || collector?.StopRequested == true ? "采集器已停止" : collector is null ? "采集器未启动" : now - collector.Heartbeat > TimeSpan.FromSeconds(75) ? "采集器心跳已过期" : "后台采集运行中";
         RefreshTopology();
-        foreach (var name in new[] { nameof(TotalCount), nameof(OnlineCount), nameof(OfflineCount), nameof(AlarmCount), nameof(CurrentHealth), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(MetricsHint), nameof(MemberHealthRows), nameof(CollectorLabel), nameof(OverviewHint), nameof(FilteredDeviceRows) }) Changed(name);
+        foreach (var name in new[] { nameof(TotalCount), nameof(OnlineCount), nameof(OfflineCount), nameof(AlarmCount), nameof(CurrentHealth), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(MetricsHint), nameof(MemberHealthRows), nameof(HasMemberHealth), nameof(CollectorLabel), nameof(OverviewHint) }) Changed(name);
     }
     public void RefreshTopology()
     {
