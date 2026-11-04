@@ -365,6 +365,13 @@
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="Margin" Value="10,0,8,0" />
     </Style>
+    <Style x:Key="HealthMetricText" TargetType="TextBlock" BasedOn="{StaticResource GridCellText}">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="Margin" Value="12,0" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
     <Style TargetType="DataGrid">
       <Setter Property="Background" Value="White" />
       <Setter Property="Foreground" Value="#334155" />
@@ -389,6 +396,9 @@
       <Setter Property="FontWeight" Value="Normal" />
       <Setter Property="Padding" Value="12,8" />
       <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style x:Key="HealthCenteredHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
     <Style TargetType="DataGridCell">
       <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -459,6 +469,12 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <DataTemplate x:Key="HealthDeviceIdentity">
+      <StackPanel VerticalAlignment="Center" Margin="12,0">
+        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+        <TextBlock Foreground="#64748B" FontSize="11" Margin="0,5,0,0" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"><Run Text="{Binding Address, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding SourceLabel, Mode=OneWay}" /></TextBlock>
+      </StackPanel>
+    </DataTemplate>
     <Style TargetType="Expander">
       <Setter Property="Foreground" Value="#475569" />
       <Setter Property="Margin" Value="0,8,0,8" />
