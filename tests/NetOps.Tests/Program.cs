@@ -1,4 +1,6 @@
 using System.Net;
+using System.IO;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using NetOps.Application;
@@ -39,7 +41,7 @@ Test("基线变化后拒绝执行", () => { var p = engine.Preview(device, new(C
 Test("预览请求与返回值均隔离调用方修改", () => { var req = Access("GigabitEthernet1/0/1"); var p = engine.Preview(device, req); req.Ports![0] = "GigabitEthernet1/0/24"; p.Request.Ports![0] = "GigabitEthernet1/0/23"; p.Commands[0] = "reboot"; engine.ApplySimulation(p.Id, true); Check(workspace.GetState(device.Id)!.Ports[0].Pvid == 20); Check(workspace.GetState(device.Id)!.Ports[22].Pvid == 10); });
 Test("管理 VLAN 与上联端口风险提示", () => { var p = engine.Preview(device, Access("GigabitEthernet1/0/24", 99)); Check(p.Risks.Any(r => r.Contains("上联"))); Check(p.Risks.Any(r => r.Contains("管理 VLAN"))); });
 Test("无变化时不生成执行计划", () => Reject(() => engine.Preview(device, Access("GigabitEthernet1/0/1"))));
-Test("真实设备不能绕过执行隔离", () => { var real = device with { Id = Guid.NewGuid(), IsSimulation = false }; workspace.SaveDevice(real); workspace.SaveState(workspace.GetState(device.Id)! with { DeviceId = real.Id }); Reject(() => engine.Preview(real, new(CreateVlanId: 40, VlanName: "Blocked"))); var p = engine.Preview(device, new(CreateVlanId: 40, VlanName: "Blocked")); workspace.SaveDevice(device with { IsSimulation = false }); try { Reject(() => engine.ApplySimulation(p.Id, true)); } finally { workspace.SaveDevice(device); } });
+Test("真实预览与模拟执行隔离", () => { var real = device with { Id = Guid.NewGuid(), IsSimulation = false, DriverId = "huawei.vrp" }; workspace.SaveDevice(real); workspace.SaveState(workspace.GetState(device.Id)! with { DeviceId = real.Id }); var livePlan = engine.Preview(real, new(CreateVlanId: 40, VlanName: "LivePreview")); Check(!livePlan.IsSimulation); Reject(() => engine.ApplySimulation(livePlan.Id, true)); var p = engine.Preview(device, new(CreateVlanId: 40, VlanName: "Blocked")); workspace.SaveDevice(device with { IsSimulation = false }); try { Reject(() => engine.ApplySimulation(p.Id, true)); } finally { workspace.SaveDevice(device); } });
 Test("未实现的品牌及设备角色不能生成配置", () => { Reject(() => engine.Preview(device with { Vendor = Vendor.Juniper }, new(CreateVlanId: 40, VlanName: "Blocked"))); Reject(() => engine.Preview(device with { Role = DeviceRole.Firewall }, new(CreateVlanId: 40, VlanName: "Blocked"))); });
 Test("四种厂商命令按语法分离", () => { foreach (var vendor in new[] { Vendor.Huawei, Vendor.H3C, Vendor.Cisco, Vendor.Ruijie }) { var p = engine.Preview(device with { Vendor = vendor }, new(CreateVlanId: 40, VlanName: "Guest")); Check(p.Commands.Contains("vlan 40")); Check(!p.Commands.Any(c => c is "save" or "write memory")); } Check(drivers.Resolve(device).ReadCommand(ReadCommand.Version) == "display version"); Check(drivers.Resolve(device with { Vendor = Vendor.Cisco }).ReadCommand(ReadCommand.Version) == "show version"); });
 Test("事务竞争时拒绝覆盖新状态", () => { var before = workspace.GetState(device.Id)!; workspace.SaveState(before with { Revision = before.Revision + 1 }); Reject(() => workspace.CommitSimulation(before, before with { Revision = before.Revision + 2 }, new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, "竞争测试", "x"), new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, "竞争测试", "x"))); });
@@ -88,7 +90,9 @@ await AsyncTest("SSH 在联网前拒绝缺少指纹的真实设备", async () =>
     catch (InvalidOperationException ex) { Check(ex.Message.Contains("指纹")); }
 });
 
-Console.WriteLine($"\n验证结果：通过 {passed} 项，失败 {failed} 项；未连接真实设备或 AI 服务。");
+await WorkflowChecks.Run(root, Test, AsyncTest);
+await ImportChecks.Run(root, Test, AsyncTest);
+Console.WriteLine($"\n验证结果：通过 {passed} 项，失败 {failed} 项；仅使用临时数据、会话夹具和本机回环服务，未连接真实设备或 AI 服务。");
 var resolved = Path.GetFullPath(root);
 if (resolved.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(resolved).StartsWith("netops-tests-", StringComparison.Ordinal)) Directory.Delete(resolved, true);
 return failed == 0 ? 0 : 1;

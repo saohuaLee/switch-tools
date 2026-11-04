@@ -2,6 +2,7 @@ name: 中文桌面应用构建与验证
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

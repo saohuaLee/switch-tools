@@ -66,6 +66,25 @@ public sealed class LocalWorkspace : IWorkspace
     }
     public IReadOnlyList<Device> GetDevices() => ReadAll<Device>("SELECT payload FROM devices ORDER BY rowid");
     public void SaveDevice(Device device) { device.Validate(); Save("devices", device.Id, device); }
+    public void ImportDevices(IReadOnlyList<Device> devices)
+    {
+        if (devices.Count is < 1 or > 1000) throw new ArgumentException("每次导入 1–1000 台设备。");
+        foreach (var d in devices) { d.Validate(); foreach (var p in d.GetConnections()) p.Validate(); }
+        using var db = Open(); using var tx = db.BeginTransaction();
+        using var read = db.CreateCommand(); read.Transaction = tx; read.CommandText = "SELECT payload FROM devices";
+        var addresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var rows = read.ExecuteReader()) while (rows.Read()) { var d = JsonSerializer.Deserialize<Device>(rows.GetString(0))!; if (System.Net.IPAddress.TryParse(d.ManagementIp, out var ip)) addresses.Add(ip.ToString()); }
+        foreach (var d in devices)
+        {
+            if (System.Net.IPAddress.TryParse(d.ManagementIp, out var ip) && !addresses.Add(ip.ToString())) throw new ArgumentException($"管理地址 {ip} 已存在或在清单中重复；本次导入未保存任何设备。");
+            using var insert = db.CreateCommand(); insert.Transaction = tx; insert.CommandText = "INSERT INTO devices(id,payload) VALUES($id,$payload)"; insert.Parameters.AddWithValue("$id", d.Id.ToString()); insert.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(d)); insert.ExecuteNonQuery();
+            if (DemoWorkspace.CreateState(d) is { } state)
+            {
+                using var stateInsert = db.CreateCommand(); stateInsert.Transaction = tx; stateInsert.CommandText = "INSERT INTO states(id,payload) VALUES($id,$payload)"; stateInsert.Parameters.AddWithValue("$id", d.Id.ToString()); stateInsert.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(state)); stateInsert.ExecuteNonQuery();
+            }
+        }
+        tx.Commit();
+    }
     public DeviceState? GetState(Guid deviceId) => ReadAll<DeviceState>("SELECT payload FROM states WHERE id=$device", deviceId.ToString()).SingleOrDefault();
     public void SaveState(DeviceState state) => Save("states", state.DeviceId, state);
     public IReadOnlyList<Snapshot> GetSnapshots(Guid deviceId) => ReadAll<Snapshot>("SELECT payload FROM snapshots WHERE device_id=$device ORDER BY created DESC", deviceId.ToString(), true);
@@ -109,17 +128,25 @@ public static class DemoWorkspace
         if (workspace.GetDevices().Count != 0) return;
         Add(workspace, new(Guid.NewGuid(), "园区核心交换机（模拟）", "192.0.2.10", Vendor.Huawei, "S5735 · 模拟档案", "VRP · 未经真机验证", DeviceRole.Switch, "总部 · 核心机房", ManagementVlan: 99));
         Add(workspace, new(Guid.NewGuid(), "办公区接入交换机（模拟）", "192.0.2.20", Vendor.H3C, "S5130 · 模拟档案", "Comware · 未经真机验证", DeviceRole.Switch, "总部 · 二层弱电间", ManagementVlan: 99));
-        Add(workspace, new(Guid.NewGuid(), "研发区交换机（模拟）", "192.0.2.30", Vendor.Cisco, "Catalyst · 模拟档案", "IOS · 未经真机验证", DeviceRole.Switch, "研发中心", ManagementVlan: 99));
+        var stack = new Device(Guid.NewGuid(), "研发区堆叠交换机（模拟）", "192.0.2.30", Vendor.Cisco, "Catalyst · 双成员模拟档案", "IOS · 未经真机验证", DeviceRole.Switch, "研发中心", ManagementVlan: 99);
+        Add(workspace, stack);
+        var baseline = workspace.GetState(stack.Id)!;
+        var ports = Enumerable.Range(1, 2).SelectMany(member => Enumerable.Range(1, member == 1 ? 24 : 48).Select(i => new PortState($"GigabitEthernet{member}/0/{i}", $"Member{member}-Desk{i:00}", true, i <= 12, 1000, PortMode.Access, 10, []))).ToArray();
+        workspace.SaveState(baseline with { Ports = ports, StackMembers = [new(1, "Active", "模拟在线", "24 口模拟成员", PortCount: 24, Online: true), new(2, "Standby", "模拟在线", "48 口模拟成员", PortCount: 48, Online: true)] });
     }
     public static void Add(IWorkspace workspace, Device device)
     {
         workspace.SaveDevice(device);
-        if (!device.IsSimulation) return;
+        if (CreateState(device) is { } state) workspace.SaveState(state);
+    }
+    public static DeviceState? CreateState(Device device)
+    {
+        if (!device.IsSimulation || device.Role != DeviceRole.Switch) return null;
         var prefix = device.Vendor == Vendor.Cisco ? "GigabitEthernet" : "GigabitEthernet";
         var vlans = new[] { new VlanState(1, "Default"), new(10, "Office"), new(20, "Server"), new(device.ManagementVlan, "Management") }.DistinctBy(v => v.Id).OrderBy(v => v.Id).ToArray();
         var ports = Enumerable.Range(1, 24).Select(i => new PortState($"{prefix}1/0/{i}", i == 24 ? "Core-Uplink" : $"Office-{i:00}", true, i <= 16 || i == 24,
             1000, i == 24 ? PortMode.Trunk : PortMode.Access, i == 24 ? device.ManagementVlan : 10,
             i == 24 ? vlans.Select(v => v.Id).ToArray() : [], i == 24)).ToArray();
-        workspace.SaveState(new(device.Id, 1, ports, vlans));
+        return new(device.Id, 1, ports, vlans);
     }
 }

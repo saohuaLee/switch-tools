@@ -10,14 +10,20 @@ namespace NetOps.Infrastructure;
 public static class AiContext
 {
     // 采用字段白名单；不读取凭据、原始配置、IP、位置或端口描述。
-    public static string Build(Device device, DeviceState? state) => JsonSerializer.Serialize(new
+    public static string Build(Device device, DeviceState? state)
     {
-        数据来源 = device.IsSimulation ? "本地模拟数据，不能证明真实网络状态" : "真实设备档案，尚无结构化实时采集",
+        var hasActual = state?.CapturedAt is not null && state.Ports.Length > 0 && state.Ports.All(p => p.Extensions?.GetValueOrDefault("source") == "running-config");
+        var include = device.IsSimulation || hasActual;
+        return JsonSerializer.Serialize(new
+        {
+        数据来源 = device.IsSimulation ? "本地模拟数据，不能证明真实网络状态" : hasActual ? "真实设备只读配置解析，非实时链路监控" : "真实设备档案，尚无结构化实时采集",
+        采集时间 = state?.CapturedAt,
         厂商 = device.VendorLabel,
-        端口 = device.IsSimulation ? state?.Ports.Select(p => new { 端口 = p.Name, 启用 = p.Enabled, 链路 = p.LinkUp, 模式 = p.ModeLabel, p.Pvid, 允许VLAN = p.TaggedVlans, 上联 = p.IsUplink }) : null,
-        VLAN = device.IsSimulation ? state?.Vlans.Select(v => new { 编号 = v.Id }) : null,
+        端口 = include ? state?.Ports.Select(p => new { 端口 = p.Name, 启用 = p.Enabled, 链路 = device.IsSimulation ? p.StatusLabel : "未采集", 模式 = p.ModeLabel, p.Pvid, 允许VLAN = p.TaggedVlans.Length == 4094 ? "全部" : string.Join(",", p.TaggedVlans), 上联标记 = p.IsUplink }) : null,
+        VLAN = include ? state?.Vlans.Select(v => new { 编号 = v.Id }) : null,
         说明 = "没有路由、ARP、MAC、ACL、日志或连通性证据；不能据此确认根因。"
-    }, ChangeEngine.JsonOptions);
+        }, ChangeEngine.JsonOptions);
+    }
 }
 
 /// <summary>协议分别构造请求；模型只返回文本，不提供设备工具或执行权限。</summary>

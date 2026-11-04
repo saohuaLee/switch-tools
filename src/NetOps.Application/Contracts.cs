@@ -6,6 +6,7 @@ public interface IWorkspace
 {
     IReadOnlyList<Device> GetDevices();
     void SaveDevice(Device device);
+    void ImportDevices(IReadOnlyList<Device> devices);
     DeviceState? GetState(Guid deviceId);
     void SaveState(DeviceState state);
     IReadOnlyList<Snapshot> GetSnapshots(Guid deviceId);
@@ -26,7 +27,7 @@ public interface ISecretVault
 public interface IDeviceDriver
 {
     Vendor Vendor { get; }
-    string[] Compile(ChangeRequest request);
+    string[] Compile(ChangeRequest request, DeviceState? baseline = null);
     string ReadCommand(ReadCommand command);
 }
 public interface IDriverRegistry
@@ -41,4 +42,16 @@ public interface IReadOnlyTransport
 public interface IAiClient
 {
     Task<string> AnalyzeAsync(AiProfile profile, string question, string context, CancellationToken cancellationToken);
+}
+
+public interface IDeviceSession : IAsyncDisposable
+{
+    bool IsConnected { get; }
+    Task ConnectAsync(Device device, ConnectionProfile profile, CancellationToken ct);
+    Task SendAsync(string text, CancellationToken ct);
+    Task<string> ReadAvailableAsync(CancellationToken ct);
+}
+public interface ISessionFactory
+{
+    IDeviceSession Create(ConnectionProtocol protocol);
 }

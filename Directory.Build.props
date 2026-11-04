@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NuGetLockFilePath Condition="'$(NetOpsPublish)' == 'true'">$(MSBuildProjectDirectory)/packages.publish.lock.json</NuGetLockFilePath>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>NetOps Studio</Authors>
     <Description>网络运维工作台：跨厂商图形化配置与智能辅助排障</Description>
   </PropertyGroup>
