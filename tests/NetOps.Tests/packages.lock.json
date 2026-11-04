@@ -7,6 +7,11 @@
         "resolved": "2.7.0",
         "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
+      "Lextm.SharpSnmpLib": {
+        "type": "Transitive",
+        "resolved": "12.5.7",
+        "contentHash": "k631wRQNnFOpKxsYyziPp1UR4v+IBFS81nnmQyQa+RxSlmYjoLViNXINV43Aa49kQO1ulSUmGTI9DD94z0HAHg=="
+      },
       "Microsoft.Data.Sqlite": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -188,7 +193,7 @@
       "netops.application": {
         "type": "Project",
         "dependencies": {
-          "NetOps.Domain": "[0.2.0, )"
+          "NetOps.Domain": "[0.3.0, )"
         }
       },
       "netops.domain": {
@@ -197,8 +202,9 @@
       "netops.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "Lextm.SharpSnmpLib": "[12.5.7, )",
           "Microsoft.Data.Sqlite": "[10.0.14, )",
-          "NetOps.Application": "[0.2.0, )",
+          "NetOps.Application": "[0.3.0, )",
           "SSH.NET": "[2026.0.0, )",
           "System.IO.Ports": "[10.0.14, )"
         }
@@ -206,7 +212,7 @@
       "NetOpsStudio": {
         "type": "Project",
         "dependencies": {
-          "NetOps.Infrastructure": "[0.2.0, )"
+          "NetOps.Infrastructure": "[0.3.0, )"
         }
       }
     }

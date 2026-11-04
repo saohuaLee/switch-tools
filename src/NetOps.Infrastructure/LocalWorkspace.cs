@@ -27,7 +27,7 @@ public sealed class DpapiVault(string root) : ISecretVault
     public static string Unprotect(byte[] value) => Encoding.UTF8.GetString(ProtectedData.Unprotect(value, null, DataProtectionScope.CurrentUser));
 }
 
-public sealed class LocalWorkspace : IWorkspace
+public sealed partial class LocalWorkspace : IWorkspace
 {
     private readonly string connectionString;
     public LocalWorkspace(string path)
@@ -45,6 +45,14 @@ public sealed class LocalWorkspace : IWorkspace
             CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, created TEXT NOT NULL, payload BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS audit (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, created TEXT NOT NULL, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ai_profiles (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS monitor_profiles (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS monitor_samples (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, created TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_monitor_device_time ON monitor_samples(device_id,created);
+            CREATE TABLE IF NOT EXISTS topology_links (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS topology_positions (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS alarms (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS collector (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            UPDATE metadata SET value='2' WHERE key='schema_version' AND value='1';
             """;
         cmd.ExecuteNonQuery();
     }

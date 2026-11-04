@@ -219,8 +219,8 @@ public sealed class NetworkOperations(IWorkspace workspace, IDriverRegistry driv
         if (!device.GetConnections().Contains(profile)) throw new InvalidOperationException("连接配置已变化，请重新读取并审核。");
         var before = workspace.GetState(device.Id) ?? throw new InvalidOperationException("请先读取当前配置。");
         if (ChangeEngine.Hash(before) != plan.BaselineHash) throw new InvalidOperationException("本地基线已变化，请重新预览。");
-        ChangeEngine.ValidateRequest(device, before, plan.Request);
-        if (!drivers.Resolve(device).Compile(plan.Request, before).SequenceEqual(plan.Commands)) throw new InvalidOperationException("命令与结构化请求不一致，已拒绝执行。");
+        var target = ChangeEngine.ProjectBatch(device, before, ChangeEngine.Requests(plan));
+        if (!ChangeEngine.CompileBatch(drivers.Resolve(device), before, ChangeEngine.Requests(plan)).SequenceEqual(plan.Commands)) throw new InvalidOperationException("命令与结构化请求不一致，已拒绝执行。");
         await using var cli = new CliConversation(sessions.Create(ConnectionProtocol.Ssh));
         await cli.OpenAsync(device, profile, ct); await cli.ExecuteAsync(PrepareCommand(device.Vendor), ct);
         progress.Report("重新读取并核对设备基线…");
@@ -249,7 +249,6 @@ public sealed class NetworkOperations(IWorkspace workspace, IDriverRegistry driv
                 after = SwitchInventory.Merge(after, finalInventory.Ports, finalInventory.Members, finalInventory.Warning);
                 if (SwitchInventory.Signature(after) != SwitchInventory.Signature(before)) throw new InvalidOperationException("下发后堆叠拓扑或端口清单已变化，验证未通过；未保存启动配置。");
             }
-            var target = ChangeEngine.Transform(before, plan.Request);
             if (ChangeEngine.ConfigurationHash(after) != ChangeEngine.ConfigurationHash(target)) throw new InvalidOperationException("下发后配置与目标不一致，可能已部分生效，请检查备份和终端；未执行自动回滚。");
             workspace.SaveState(after);
             var message = "下发与回读验证通过，尚未保存到启动配置。";

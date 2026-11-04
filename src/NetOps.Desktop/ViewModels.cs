@@ -32,7 +32,7 @@ public sealed class PortItem(PortState state, bool showFullName = false) : Obser
     public bool Picked { get => picked; set { if (Set(ref picked, value)) { Changed(nameof(Fill)); Changed(nameof(SelectionMark)); } } }
     public string Number => State.Name.Split('/').Last();
     public string TileLabel => showFullName ? State.Name.Replace("GigabitEthernet", "GE", StringComparison.Ordinal).Replace("FastEthernet", "FE", StringComparison.Ordinal) : Number;
-    public string Fill => Picked ? "#285A61" : "#17283A";
+    public string Fill => Picked ? "#DFEBFF" : "#F8FAFC";
     public string SelectionMark => Picked ? "✓" : "";
     public string Detail => $"{State.Name} · {State.ModeLabel} · PVID {State.Pvid} · {State.StatusLabel}";
     public override string ToString() => Detail;
@@ -53,7 +53,7 @@ public sealed class MacItem(MacBinding binding) : Observable
 }
 public sealed record PortPanelGroup(string Label, PortItem[] Items);
 
-public sealed class MainViewModel : Observable, IDisposable
+public sealed partial class MainViewModel : Observable, IDisposable
 {
     private readonly IWorkspace workspace;
     private readonly ISecretVault vault;
@@ -85,7 +85,7 @@ public sealed class MainViewModel : Observable, IDisposable
         PreviewVlan = new(_ => Guard(() => ShowPlan(BuildVlanRequest())), () => CanConfigure && Ready && VlanValidation.Length == 0);
         ApplyPlan = new(_ => _ = RunAsync("执行变更", ApplyAsync), () => Ready && plan is not null && PlanConfirmed && (plan.IsSimulation || LiveRiskAccepted));
         CloseReview = new(_ => ReviewOpen = false, () => !IsApplying);
-        TogglePort = new(p => { if (p is PortItem port) { port.Picked = !port.Picked; EditorOpen = true; } }, () => CanConfigure);
+        TogglePort = new(p => { if (p is PortItem port) port.Picked = !port.Picked; }, () => CanConfigure);
         SelectAllPorts = new(_ => SelectPorts(p => !p.State.IsUplink && p.State.Mode == PortMode.Access), () => CanConfigure);
         ClearSelection = new(_ => SelectPorts(_ => false), () => Ports.Any(p => p.Picked));
         SelectRange = new(_ => Guard(() => { var names = PortSelections.Parse(PortRange, Ports.Select(p => p.State.Name).ToArray()); SelectPorts(p => names.Contains(p.State.Name)); }), () => CanConfigure);
@@ -97,13 +97,14 @@ public sealed class MainViewModel : Observable, IDisposable
         DisconnectTerminal = new(_ => _ = DisconnectAsync(), () => TerminalConnected);
         SendTerminal = new(_ => _ = SendTerminalAsync(), () => TerminalConnected && TerminalInput.Length > 0);
         CompareSnapshot = new(_ => Guard(Compare), () => SelectedSnapshot is not null && SelectedDevice?.IsSimulation == true);
-        NewVlan = new(_ => { SelectedVlan = null; VlanAction = VlanActions[0]; VlanId = Enumerable.Range(2, 4093).First(i => !Vlans.Any(v => v.Id == i)).ToString(); VlanName = ""; });
+        NewVlan = new(_ => { SelectedVlan = null; VlanAction = VlanActions[0]; VlanId = Enumerable.Range(2, 4093).First(i => !AvailableVlans.Any(v => v.Id == i)).ToString(); VlanName = ""; });
         PreviewMac = new(_ => Guard(() => ShowPlan(BuildMacRequest())), () => CanConfigure && Ready && MacValidation.Length == 0);
         DeleteMac = new(_ => Guard(() => ShowPlan(new(RemoveMacBindings: MacBindings.Where(b => b.Picked).Select(b => b.Binding).ToArray()))), () => CanConfigure && Ready && MacBindings.Any(b => b.Picked));
         MacTemplate = new(_ => MacBatch = string.Join("\n", Ports.Where(p => p.Picked).Select(p => $",{p.State.Pvid},{p.State.Name}")), () => CanConfigure && Ports.Any(p => p.Picked));
         SelectPortGroup = new(group => { if (group is PortPanelGroup g) { loading = true; foreach (var port in g.Items) port.Picked = true; loading = false; SelectionChanged(); } }, () => CanConfigure);
         commands = [ReadCurrent, Backup, PreviewPorts, PreviewVlan, ApplyPlan, CloseReview, TogglePort, SelectAllPorts, ClearSelection, SelectRange, EditPorts, ToggleAi, AskAi, Cancel, ConnectTerminal, DisconnectTerminal, SendTerminal, CompareSnapshot, NewVlan, PreviewMac, DeleteMac, MacTemplate, SelectPortGroup];
         SelectedProfile = Profiles.FirstOrDefault(p => p.IsDefault) ?? Profiles.FirstOrDefault(); EditingProfile = SelectedProfile; SelectedDevice = Devices.FirstOrDefault(d => !d.Archived);
+        InitializeWorkbench();
     }
 
     public ObservableCollection<Device> Devices { get; }
@@ -125,8 +126,8 @@ public sealed class MainViewModel : Observable, IDisposable
     private readonly Dictionary<Guid, string> macDrafts = [];
     private string macBatch = "";
     public string MacBatch { get => macBatch; set { Set(ref macBatch, value); if (SelectedDevice is not null) macDrafts[SelectedDevice.Id] = value; InvalidatePlan(); Changed(nameof(MacValidation)); RefreshCommands(); } }
-    public string MacValidation { get { if (!CanConfigure) return CapabilityHint; try { ChangeEngine.ValidateRequest(RequireDevice(), workspace.GetState(RequireDevice().Id)!, BuildMacRequest()); return ""; } catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return ex.Message; } } }
-    public ChangeRequest BuildMacRequest() => new(AddMacBindings: MacRules.ParseBatch(MacBatch, SelectedMacKind.Value));
+    public string MacValidation { get { if (!CanConfigure) return CapabilityHint; try { ChangeEngine.ValidateRequest(RequireDevice(), ProjectedState() ?? workspace.GetState(RequireDevice().Id)!, BuildMacRequest()); return ""; } catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return ex.Message; } } }
+    public ChangeRequest BuildMacRequest() => new(AddMacBindings: MacRows.Count > 0 ? MacRows.Select(r => MacRules.Canonical(new(r.Address.Trim(), ParseInt(r.Vlan, "VLAN"), r.PortName, SelectedMacKind.Value))).ToArray() : MacRules.ParseBatch(MacBatch, SelectedMacKind.Value));
     public Choice<PortMode>[] Modes { get; } = [new(PortMode.Access, "接入 Access"), new(PortMode.Trunk, "干道 Trunk")];
     public Choice<int>[] VlanActions { get; } = [new(0, "创建 VLAN"), new(1, "重命名 VLAN"), new(2, "删除 VLAN")];
     public Choice<AiProtocol>[] Protocols { get; } = [new(AiProtocol.Responses, "OpenAI 响应协议"), new(AiProtocol.ClaudeMessages, "Claude 消息协议"), new(AiProtocol.Gemini, "Gemini 内容生成协议"), new(AiProtocol.ChatCompletions, "对话补全兼容协议"), new(AiProtocol.Ollama, "Ollama 本机协议")];
@@ -172,12 +173,12 @@ public sealed class MainViewModel : Observable, IDisposable
         {
             if (value?.Id == selectedDevice?.Id && value == selectedDevice) return;
             if (TerminalConnected) { Status = "请先断开当前设备终端，再切换设备。"; Changed(); return; }
-            SaveDraft(); selectedDevice = value; Changed(); InvalidatePlan(); Connections.Clear();
+            SaveDraft(); SaveMacRows(selectedDevice?.Id); selectedDevice = value; Changed(); InvalidatePlan(); Connections.Clear();
             macBatch = value is null ? "" : macDrafts.GetValueOrDefault(value.Id, ""); Changed(nameof(MacBatch));
             foreach (var profile in value?.GetConnections() ?? []) Connections.Add(profile);
             selectedConnection = Connections.FirstOrDefault(p => p.Id == value?.PreferredConnectionId) ?? Connections.FirstOrDefault(); Changed(nameof(SelectedConnection));
-            SelectedVlan = null; ContextApproved = false; ConnectionOutput = value is null ? "请选择设备。" : readResults.GetValueOrDefault(value.Id, "尚未连接与读取当前设备。点击上方“读取当前配置”开始。");
-            RefreshCurrent(false); RestoreDraft(); RefreshAll();
+            SelectedVlan = null; ContextApproved = false; ConnectionOutput = value is null ? "请选择设备。" : readResults.GetValueOrDefault(value.Id, "尚未连接与读取当前设备。点击“读取设备配置”开始。");
+            RefreshCurrent(false); RestoreDraft(); RestoreMacRows(value?.Id); RefreshAll();
         }
     }
     private ConnectionProfile? selectedConnection;
@@ -189,10 +190,10 @@ public sealed class MainViewModel : Observable, IDisposable
     private int section;
     public int Section { get => section; set { if (Set(ref section, value) && value != 1) EditorOpen = false; } }
     private string search = "";
-    public string Search { get => search; set { Set(ref search, value); Changed(nameof(FilteredDevices)); } }
+    public string Search { get => search; set { Set(ref search, value); Changed(nameof(FilteredDevices)); Changed(nameof(FilteredDeviceRows)); } }
     public IEnumerable<Device> FilteredDevices => Devices.Where(d => !d.Archived && $"{d.Name} {d.ManagementIp} {d.VendorLabel} {d.Location}".Contains(Search, StringComparison.OrdinalIgnoreCase));
     public string DeviceSummary => SelectedDevice is null ? "请选择设备" : $"{SelectedDevice.VendorLabel} · {SelectedDevice.Model} · {SelectedDevice.ManagementIp} · {SelectedDevice.ModeLabel}";
-    public string CapabilityHint => SelectedDevice is null ? "请先选择设备。" : SelectedDevice.Role != DeviceRole.Switch ? "此角色支持连接与高级终端；三层和防火墙图形化配置按原方案列入 P1。" : SelectedDevice.Vendor is not (Vendor.Huawei or Vendor.H3C or Vendor.Cisco or Vendor.Ruijie) ? "此厂商当前提供通用会话接入，图形化配置驱动待适配。" : !CanConfigure ? "请先读取当前配置，建立可审核的端口与 VLAN 基线。" : "已建立配置基线；仅提交勾选修改的字段。";
+    public string CapabilityHint => SelectedDevice is null ? "请先选择设备。" : SelectedDevice.Role != DeviceRole.Switch ? "此角色支持连接与高级终端；三层和防火墙图形化配置按原方案列入 P1。" : SelectedDevice.Vendor is not (Vendor.Huawei or Vendor.H3C or Vendor.Cisco or Vendor.Ruijie) ? "此厂商当前提供通用会话接入，图形化配置驱动待适配。" : !CanConfigure ? "请先读取当前配置，建立可审核的端口与 VLAN 基线。" : "已建立配置基线；仅提交实际编辑的字段。";
     public bool SupportsConfiguration => SelectedDevice?.Role == DeviceRole.Switch && SelectedDevice.Vendor is Vendor.Huawei or Vendor.H3C or Vendor.Cisco or Vendor.Ruijie;
     public bool CanConfigure => SupportsConfiguration && SelectedDevice is not null && prepared.Contains(SelectedDevice.Id) && (SelectedDevice.IsSimulation || (SelectedConnection?.Protocol == ConnectionProtocol.Ssh && preparedConnection.GetValueOrDefault(SelectedDevice.Id) == SelectedConnection.Id));
     public bool IsInteractiveProfile => SelectedDevice?.IsSimulation == true || SelectedConnection?.Protocol is ConnectionProtocol.Ssh or ConnectionProtocol.Console or ConnectionProtocol.Telnet;
@@ -204,7 +205,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public bool EditorOpen { get => editorOpen; set { Set(ref editorOpen, value); if (value) AiOpen = false; } }
     private bool aiOpen;
     public bool AiOpen { get => aiOpen; set { Set(ref aiOpen, value); if (value) EditorOpen = false; } }
-    private string status = "请选择设备连接，然后读取当前配置。";
+    private string status = "就绪 · 可从网络总览、拓扑或设备中心开始。";
     public string Status { get => status; set => Set(ref status, value); }
     private bool busy;
     public bool Busy { get => busy; private set { Set(ref busy, value); RefreshAll(); } }
@@ -224,15 +225,15 @@ public sealed class MainViewModel : Observable, IDisposable
     public bool ApplyDescription { get => applyDescription; set { if (Set(ref applyDescription, value)) DraftChanged(); } }
     public bool CreateInlineVlan { get => createInlineVlan; set { if (Set(ref createInlineVlan, value)) DraftChanged(); } }
     private Choice<PortMode>? selectedMode;
-    public Choice<PortMode> SelectedMode { get => selectedMode ?? Modes[0]; set { if (Set(ref selectedMode, value)) { DraftChanged(); Changed(nameof(ShowAllowed)); } } }
+    public Choice<PortMode> SelectedMode { get => selectedMode ?? Modes[0]; set { if (Set(ref selectedMode, value)) { if (!loading) ApplyMode = true; DraftChanged(); Changed(nameof(ShowAllowed)); } } }
     public bool ShowAllowed => ApplyMode ? SelectedMode.Value == PortMode.Trunk : Ports.Any(p => p.Picked && p.State.Mode == PortMode.Trunk);
     private string pvid = "", allowedVlans = "", portDescription = "", newVlanName = "";
-    public string Pvid { get => pvid; set { if (Set(ref pvid, value)) DraftChanged(); } }
-    public string AllowedVlans { get => allowedVlans; set { if (Set(ref allowedVlans, value)) DraftChanged(); } }
+    public string Pvid { get => pvid; set { if (Set(ref pvid, value)) { if (!loading) ApplyPvid = true; DraftChanged(); } } }
+    public string AllowedVlans { get => allowedVlans; set { if (Set(ref allowedVlans, value)) { if (!loading) ApplyAllowed = true; DraftChanged(); } } }
     public string PortDescription { get => portDescription; set { if (Set(ref portDescription, value)) { if (!loading) ApplyDescription = true; DraftChanged(); } } }
     public string NewVlanName { get => newVlanName; set { if (Set(ref newVlanName, value)) DraftChanged(); } }
     private bool portEnabled;
-    public bool PortEnabled { get => portEnabled; set { if (Set(ref portEnabled, value)) DraftChanged(); } }
+    public bool PortEnabled { get => portEnabled; set { if (Set(ref portEnabled, value)) { if (!loading) ApplyEnabled = true; DraftChanged(); } } }
     public string PortRange { get; set; } = "1-8";
     public int ModifiedFieldCount => new[] { ApplyMode, ApplyPvid, ApplyAllowed && ShowAllowed, ApplyEnabled, ApplyDescription }.Count(v => v);
     public string PortValidation
@@ -241,8 +242,8 @@ public sealed class MainViewModel : Observable, IDisposable
         {
             if (!CanConfigure) return CapabilityHint;
             if (!Ports.Any(p => p.Picked)) return "请选择一个或多个端口。";
-            if (ModifiedFieldCount == 0) return "勾选要修改的字段，其余字段保持原值。";
-            try { var request = BuildPortRequest(); if (request.Pvid is < 1 or > 4094) return "PVID 必须为 1–4094。"; if (request.Pvid is int id && !Vlans.Any(v => v.Id == id) && !CreateInlineVlan) return "此 VLAN 不存在，可勾选同步创建。"; ChangeEngine.ValidateRequest(RequireDevice(), workspace.GetState(RequireDevice().Id)!, request); }
+            if (ModifiedFieldCount == 0) return "直接编辑需要修改的字段，其余字段保持原值。";
+            try { var request = BuildPortRequest(); if (request.Pvid is < 1 or > 4094) return "PVID 必须为 1–4094。"; if (request.Pvid is int id && !AvailableVlans.Any(v => v.Id == id) && !CreateInlineVlan) return "此 VLAN 不存在，可勾选同步创建。"; ChangeEngine.ValidateRequest(RequireDevice(), ProjectedState() ?? workspace.GetState(RequireDevice().Id)!, request); }
             catch (ArgumentException ex) { return ex.Message; }
             return "";
         }
@@ -300,7 +301,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public Choice<int> VlanAction { get => vlanAction ?? VlanActions[0]; set { Set(ref vlanAction, value); InvalidatePlan(); Changed(nameof(VlanValidation)); RefreshCommands(); } }
     public string VlanValidation
     {
-        get { if (!CanConfigure) return CapabilityHint; try { var request = BuildVlanRequest(); ChangeEngine.ValidateRequest(RequireDevice(), workspace.GetState(RequireDevice().Id)!, request); if (request.RenameVlanId is int id && Vlans.Single(v => v.Id == id).Name == request.VlanName) return "名称尚未修改。"; return ""; } catch (ArgumentException ex) { return ex.Message; } }
+        get { if (!CanConfigure) return CapabilityHint; try { var request = BuildVlanRequest(); ChangeEngine.ValidateRequest(RequireDevice(), ProjectedState() ?? workspace.GetState(RequireDevice().Id)!, request); if (request.RenameVlanId is int id && AvailableVlans.Single(v => v.Id == id).Name == request.VlanName) return "名称尚未修改。"; return ""; } catch (ArgumentException ex) { return ex.Message; } }
     }
     private VlanState? selectedVlan;
     public VlanState? SelectedVlan { get => selectedVlan; set { if (Set(ref selectedVlan, value) && value is not null) { VlanAction = VlanActions[1]; VlanId = value.Id.ToString(); VlanName = value.Name; } } }
@@ -341,6 +342,8 @@ public sealed class MainViewModel : Observable, IDisposable
             }
             loading = true; ApplyMode = ApplyPvid = ApplyAllowed = ApplyEnabled = ApplyDescription = CreateInlineVlan = false; loading = false;
             if (selectedPlan.Request.AddMacBindings?.Length > 0) MacBatch = "";
+            foreach (var item in PendingChanges.Where(p => p.DeviceId == device.Id).ToArray()) PendingChanges.Remove(item);
+            queueBaselines.Remove(device.Id); MacRows.Clear(); NotifyQueue();
             SaveDraft(); RefreshCurrent(); InvalidatePlan();
         }
         catch { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } throw; }
@@ -534,8 +537,8 @@ public sealed class MainViewModel : Observable, IDisposable
         finally { operationCancellation.Dispose(); operationCancellation = null; Busy = false; Operation = ""; RefreshAll(); }
     }
     private static string Error(Exception ex) => ex is ArgumentException or InvalidOperationException or NotSupportedException ? ex.Message : "操作未完成，请检查连接、认证、权限或设备兼容性。敏感原文未写入日志。";
-    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); }
+    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); }
     private void RefreshAll()
-    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready) }) Changed(name); RefreshCommands(); }
+    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans) }) Changed(name); RefreshCommands(); }
     public void Dispose() { operationCancellation?.Cancel(); terminalCancellation?.Cancel(); if (terminal is not null) _ = terminal.DisposeAsync(); }
 }

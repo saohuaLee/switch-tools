@@ -86,7 +86,7 @@ public sealed record PlanDiff(string Target, string Before, string After)
 }
 public sealed record ChangePlan(Guid Id, Guid DeviceId, string BaselineHash, ChangeRequest Request,
     string[] Commands, PlanDiff[] Differences, string[] Risks, DateTimeOffset CreatedAt,
-    bool IsSimulation = true, string? TargetIdentityHash = null);
+    bool IsSimulation = true, string? TargetIdentityHash = null, ChangeRequest[]? Requests = null);
 public sealed record Snapshot(Guid Id, Guid DeviceId, DateTimeOffset CreatedAt, string Reason, string Content)
 {
     [JsonIgnore] public string TimeLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");

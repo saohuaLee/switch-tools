@@ -2,6 +2,12 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
+      "Lextm.SharpSnmpLib": {
+        "type": "Direct",
+        "requested": "[12.5.7, )",
+        "resolved": "12.5.7",
+        "contentHash": "k631wRQNnFOpKxsYyziPp1UR4v+IBFS81nnmQyQa+RxSlmYjoLViNXINV43Aa49kQO1ulSUmGTI9DD94z0HAHg=="
+      },
       "Microsoft.Data.Sqlite": {
         "type": "Direct",
         "requested": "[10.0.14, )",
@@ -197,7 +203,7 @@
       "netops.application": {
         "type": "Project",
         "dependencies": {
-          "NetOps.Domain": "[0.2.0, )"
+          "NetOps.Domain": "[0.3.0, )"
         }
       },
       "netops.domain": {

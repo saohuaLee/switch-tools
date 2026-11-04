@@ -20,5 +20,5 @@ jobs:
         run: dotnet restore NetOpsStudio.slnx --locked-mode
       - name: 构建桌面应用
         run: dotnet build NetOpsStudio.slnx -c Release --no-restore
-      - name: 验证配置引擎、存储与 AI 协议
+      - name: 验证配置、拓扑、后台监控与 AI 协议
         run: dotnet run --project tests/NetOps.Tests -c Release --no-build

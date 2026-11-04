@@ -44,8 +44,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         var device = workspace.GetDevices().Single(d => d.Id == plan.DeviceId);
         if (!device.IsSimulation || !plan.IsSimulation) throw new InvalidOperationException("禁止向真实设备执行模拟计划。");
         var before = workspace.GetState(device.Id) ?? throw new InvalidOperationException("设备状态已丢失。");
-        var after = Transform(before, plan.Request);
-        Validate(device, before, plan.Request);
+        var after = ProjectBatch(device, before, Requests(plan));
         workspace.CommitSimulation(before, after,
             new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, "模拟变更前自动备份", JsonSerializer.Serialize(before, JsonOptions)),
             new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, "模拟配置变更", $"验证通过，共 {plan.Differences.Length} 项差异；计划 {plan.Id}"));
@@ -65,6 +64,26 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
     }
 
     public void Invalidate() => pending.Clear();
+    public static ChangeRequest[] Requests(ChangePlan plan) => plan.Requests ?? [plan.Request];
+    public static DeviceState ProjectBatch(Device device, DeviceState state, IEnumerable<ChangeRequest> requests)
+    { foreach (var request in requests) { Validate(device, state, request); state = Transform(state, request); } return state; }
+    public static string[] CompileBatch(IDeviceDriver driver, DeviceState state, IEnumerable<ChangeRequest> requests)
+    { List<string> commands = []; foreach (var request in requests) { commands.AddRange(driver.Compile(request, state)); state = Transform(state, request); } return commands.ToArray(); }
+    public ChangePlan PreviewMany(Device device, IReadOnlyList<ChangeRequest> inputs)
+    {
+        if (inputs.Count is < 1 or > 100) throw new ArgumentException("每次审核 1–100 组变更。");
+        if (inputs.Count == 1) return Preview(device, inputs[0]);
+        device.Validate(); var before = workspace.GetState(device.Id) ?? throw new InvalidOperationException("请先读取配置。");
+        var requests = JsonSerializer.Deserialize<ChangeRequest[]>(JsonSerializer.Serialize(inputs))!.Select(r => r with { AddMacBindings = r.AddMacBindings?.Select(MacRules.Canonical).ToArray(), RemoveMacBindings = r.RemoveMacBindings?.Select(MacRules.Canonical).ToArray() }).ToArray();
+        var target = ProjectBatch(device, before, requests); var differences = Differences(before, target);
+        if (differences.Length == 0) throw new ArgumentException("待提交内容没有造成最终差异。");
+        List<string> risks = [device.IsSimulation ? "当前为本地模拟批量变更，不访问真实设备。" : "真实设备批量变更：先重新读取基线和备份，顺序执行；失败可能部分生效。"];
+        if (requests.Any(r => r.Ports?.Any(n => before.Ports.Any(p => p.Name == n && (p.IsUplink || p.Pvid == device.ManagementVlan))) == true)) risks.Add("包含上联或管理端口，可能影响管理路径与下游网络。");
+        if (requests.Any(r => MacRules.SecurityChanges(r).Length > 0)) risks.Add("源 MAC 白名单会临时关闭相关接口，完成后恢复原启停状态；未知终端可能被限制。");
+        if (requests.Any(r => r.Enabled == false)) risks.Add("包含禁用端口操作，连接终端将中断。");
+        var plan = new ChangePlan(Guid.NewGuid(), device.Id, Hash(before), requests[0], CompileBatch(drivers.Resolve(device), before, requests), differences, risks.ToArray(), DateTimeOffset.UtcNow, device.IsSimulation, IdentityHash(device), requests);
+        pending.Clear(); pending[plan.Id] = plan; return Clone(plan);
+    }
     public static string IdentityHash(Device device) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(device))));
     public static string ConfigurationHash(DeviceState state) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
     {

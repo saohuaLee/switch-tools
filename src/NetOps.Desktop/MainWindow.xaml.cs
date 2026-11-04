@@ -6,6 +6,10 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using Microsoft.Win32;
 using NetOps.Infrastructure;
+using NetOps.Domain;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace NetOps.Desktop;
 
@@ -13,24 +17,60 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel viewModel;
     private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly string workspaceRoot;
     public MainWindow()
     {
         InitializeComponent();
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--qa")) Title = "网络运维工作台 · 独立验收 0.2";
+        if (args.Contains("--qa")) Title = "网络运维工作台 · 浅色独立验收 0.3";
         var index = Array.IndexOf(args, "--workspace");
         var root = index >= 0 && args.Length > index + 1 ? Path.GetFullPath(args[index + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetOpsStudio", "data");
+        workspaceRoot = root;
         var workspace = new LocalWorkspace(Path.Combine(root, "workspace.db"));
         var vault = new DpapiVault(Path.Combine(root, "vault"));
         var drivers = new DriverRegistry();
         DemoWorkspace.Seed(workspace);
+        MonitorScheduler.SeedSimulation(workspace);
         var sessions = new SessionFactory(vault);
         viewModel = new(workspace, vault, drivers, new AiClient(http, vault), sessions, new NetworkOperations(workspace, drivers, sessions, vault, http));
         DataContext = viewModel;
         viewModel.PropertyChanged += ViewModelChanged;
+        viewModel.CollectorStartRequested += () => CollectorLauncher.Start(workspaceRoot);
+        refreshTimer.Tick += (_, _) => { try { viewModel.RefreshObservability(); } catch { viewModel.Status = "监控视图本次刷新未完成，历史数据仍保留。"; } };
+        refreshTimer.Start();
         RefreshMatrix();
-        Closed += (_, _) => { viewModel.Dispose(); http.Dispose(); };
+        Loaded += (_, _) => { if (!workspace.CollectorStopRequested() && workspace.MonitorProfiles().Any(p => p.Enabled)) CollectorLauncher.Start(workspaceRoot); };
+        Closed += (_, _) => { refreshTimer.Stop(); viewModel.Dispose(); http.Dispose(); };
     }
+    private void OpenQueueClick(object sender, RoutedEventArgs e) => viewModel.Page = 4;
+    private void BackToDevicesClick(object sender, RoutedEventArgs e) => viewModel.DeviceFocused = false;
+    private void DeviceRowDoubleClick(object sender, MouseButtonEventArgs e)
+    { if (sender is DataGrid { SelectedItem: DeviceHealthRow row } && e.OriginalSource is DependencyObject source && FindParent<DataGridRow>(source) is not null) viewModel.OpenDevice.Execute(row); }
+    private static T? FindParent<T>(DependencyObject? current) where T : DependencyObject
+    { while (current is not null) { if (current is T match) return match; current = VisualTreeHelper.GetParent(current); } return null; }
+    private void AutoLayoutClick(object sender, RoutedEventArgs e) => viewModel.AutoLayout();
+    private void ToggleStackClick(object sender, RoutedEventArgs e) => viewModel.ToggleStack();
+    private void RemoveManualLinkClick(object sender, RoutedEventArgs e)
+    {
+        if (viewModel.SelectedTopologyLink?.Manual != true) { viewModel.Status = "请选择手工添加的连接。"; return; }
+        if (MessageBox.Show(this, "移除此手工连接？设备配置不会因此改变。", "移除拓扑连接", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try { viewModel.RemoveManualLink(); } catch (InvalidOperationException ex) { viewModel.Status = ex.Message; }
+    }
+    private void TopologyZoomChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    { if (NetworkCanvas is not null) NetworkCanvas.LayoutTransform = new ScaleTransform(e.NewValue, e.NewValue); }
+    private void OpenTopologyDeviceClick(object sender, RoutedEventArgs e)
+    {
+        var id = viewModel.SelectedTopologyNode?.Health?.Device.Id ?? viewModel.SelectedTopologyLink?.LocalDeviceId;
+        if (id is not Guid deviceId) { viewModel.Status = "请先选择一个已纳管设备或连接。"; return; }
+        var port = viewModel.SelectedTopologyLink?.LocalPort; viewModel.OpenDevice.Execute(deviceId);
+        if (port is not null) { viewModel.Section = 1; foreach (var item in viewModel.Ports) item.Picked = SwitchInventory.NormalizePort(item.State.Name).Equals(SwitchInventory.NormalizePort(port), StringComparison.OrdinalIgnoreCase); }
+    }
+    private void MonitorSettingsClick(object sender, RoutedEventArgs e)
+    { if (viewModel.SelectedDevice is not null) new MonitorWindow(viewModel) { Owner = this }.ShowDialog(); }
+    private void ManualLinkClick(object sender, RoutedEventArgs e) => new ManualLinkWindow(viewModel) { Owner = this }.ShowDialog();
+    private void StageMacClick(object sender, RoutedEventArgs e)
+    { MacDraftGrid.CommitEdit(DataGridEditingUnit.Cell, true); MacDraftGrid.CommitEdit(DataGridEditingUnit.Row, true); viewModel.StageMac.Execute(null); }
     private void AddDeviceClick(object sender, RoutedEventArgs e) => new AddDeviceWindow(viewModel) { Owner = this }.ShowDialog();
     private void EditDeviceClick(object sender, RoutedEventArgs e)
     {
