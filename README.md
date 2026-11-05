@@ -2,7 +2,9 @@
 
 C# / .NET 10 / WPF 中文 Windows 桌面工具，将交换机日常配置、网络拓扑、设备监控与 AI 辅助排障放在同一个浅色工作台中。
 
-**当前版本：0.4.1 开发预览 · Windows x64 · 仓库保持 Private**
+**当前版本：0.4.1 开发预览 · Windows x64 · Public 公开仓库**
+
+[下载 Windows x64 程序包](https://github.com/saohuaLee/switch-tools/releases/download/v0.4.1/NetOpsStudio-v0.4.1-win-x64.zip) · [GitHub 发布页](https://github.com/saohuaLee/switch-tools/releases/tag/v0.4.1) · [SHA256 校验文件](https://github.com/saohuaLee/switch-tools/releases/download/v0.4.1/SHA256SUMS.txt)
 
 [界面预览](#界面预览) · [功能清单](#本版功能) · [启动与验证](#启动与验证) · [配置步骤](#端口与堆叠操作) · [需求与兼容范围](docs/原方案需求对照.md)
 
@@ -95,6 +97,18 @@ C# / .NET 10 / WPF 中文 Windows 桌面工具，将交换机日常配置、网�
 
 ## 启动与验证
 
+### 下载发行包
+
+从上方 GitHub 发布页下载 `NetOpsStudio-v0.4.1-win-x64.zip`，解压后运行 `NetOpsStudio.exe`。程序包包含运行时，面向 Windows x64，无需预装 .NET；不会附带开发者的设备数据库、连接凭据或本地配置。详细变更与当前验证边界见 [0.4.1 发布说明](docs/发布说明-v0.4.1.md)。
+
+可用以下命令计算下载包的 SHA256，与发布页的 `SHA256SUMS.txt` 对照：
+
+```powershell
+Get-FileHash .\NetOpsStudio-v0.4.1-win-x64.zip -Algorithm SHA256
+```
+
+### 从源码运行
+
 要求 Windows x64；开发需要 .NET 10 SDK。脚本优先使用 `%LOCALAPPDATA%\NetOpsStudio\dotnet` 的本地 SDK，否则使用系统 SDK。
 
 ```powershell
@@ -175,6 +189,12 @@ docs/                     架构、需求对照、开发计划及验收记录
 ```
 
 ## 验证与更新记录
+
+### 2026-11-05 · 发布 0.4.1 与公开仓库
+
+- 按仓库所有者的明确要求，将 GitHub 仓库调整为 Public，并更新协作规则中的可见性约定。
+- 发布 `v0.4.1` 开发预览版，提供 Windows x64 自包含 ZIP 程序包、使用说明和 SHA256 校验文件。
+- 发布前使用 Gitleaks 检查完整 Git 历史，未检测到凭据泄露；检查历史文件名，未发现数据库、私钥或本地敏感配置被提交。功能验证沿用当前版本已通过的 109 项检查，不将模拟验证作为真机认证。
 
 ### 2026-11-04 · 0.4.1 总览表格排版修正
 
