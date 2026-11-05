@@ -2,11 +2,11 @@
 
 C# / .NET 10 / WPF 中文 Windows 桌面工具，将交换机日常配置、网络拓扑、设备监控与 AI 辅助排障放在同一个浅色工作台中。
 
-**当前源码：0.5.0 开发预览 · 最近已发布程序包：0.4.1 · Windows x64 · Public 公开仓库**
+**当前版本：0.5.0 开发预览 · Windows x64 · Public 公开仓库**
 
-0.5.0 重构整体操作主线：启动先选设备，再从任务卡选择操作，填写后直接审核执行；批量草稿改为可选。MAC 支持批量输入、格式整理、按端口自动填写 `maximum`、三种违规动作中文下拉框，以及英文命令旁的中文解释。下方下载链接仍为已发布的 0.4.1；体验本次功能请从源码运行或使用本机新构建的程序。
+0.5.0 重构整体操作主线：启动先选设备，再从任务卡选择操作，填写后直接审核执行；批量草稿改为可选。MAC 支持批量输入、格式整理、按端口自动填写 `maximum`、三种违规动作中文下拉框，以及英文命令旁的中文解释。可直接下载下方 0.5.0 Windows 程序包。
 
-[下载 Windows x64 程序包](https://github.com/saohuaLee/switch-tools/releases/download/v0.4.1/NetOpsStudio-v0.4.1-win-x64.zip) · [GitHub 发布页](https://github.com/saohuaLee/switch-tools/releases/tag/v0.4.1) · [SHA256 校验文件](https://github.com/saohuaLee/switch-tools/releases/download/v0.4.1/SHA256SUMS.txt)
+[下载 Windows x64 程序包](https://github.com/saohuaLee/switch-tools/releases/download/v0.5.0/NetOpsStudio-v0.5.0-win-x64.zip) · [GitHub 发布页](https://github.com/saohuaLee/switch-tools/releases/tag/v0.5.0) · [SHA256 校验文件](https://github.com/saohuaLee/switch-tools/releases/download/v0.5.0/SHA256SUMS.txt)
 
 [界面预览](#界面预览) · [功能清单](#本版功能) · [启动与验证](#启动与验证) · [配置步骤](#端口与堆叠操作) · [需求与兼容范围](docs/原方案需求对照.md)
 
@@ -101,12 +101,12 @@ C# / .NET 10 / WPF 中文 Windows 桌面工具，将交换机日常配置、网�
 
 ### 下载发行包
 
-从上方 GitHub 发布页下载 `NetOpsStudio-v0.4.1-win-x64.zip`，解压后运行 `NetOpsStudio.exe`。程序包包含运行时，面向 Windows x64，无需预装 .NET；不会附带开发者的设备数据库、连接凭据或本地配置。详细变更与当前验证边界见 [0.4.1 发布说明](docs/发布说明-v0.4.1.md)。
+从上方 GitHub 发布页下载 `NetOpsStudio-v0.5.0-win-x64.zip`，解压后运行 `NetOpsStudio.exe`。程序包包含运行时，面向 Windows x64，无需预装 .NET；不会附带开发者的设备数据库、连接凭据或本地配置。详细变更与当前验证边界见 [0.5.0 发布说明](docs/发布说明-v0.5.0.md)。
 
 可用以下命令计算下载包的 SHA256，与发布页的 `SHA256SUMS.txt` 对照：
 
 ```powershell
-Get-FileHash .\NetOpsStudio-v0.4.1-win-x64.zip -Algorithm SHA256
+Get-FileHash .\NetOpsStudio-v0.5.0-win-x64.zip -Algorithm SHA256
 ```
 
 ### 从源码运行
@@ -196,12 +196,17 @@ docs/                     架构、需求对照、开发计划及验收记录
 
 ## 验证与更新记录
 
+### 2026-11-05 · 发布 0.5.0 开发预览
+
+- 发布 Windows x64 自包含 ZIP，附中文使用说明、版本信息和 SHA256 校验文件，更新首页下载链接及中文发布说明。
+- 本次发行文档沿用功能变更已通过的 125 项检查与独立模拟桌面验收；真实交换机兼容性和终端通断仍未认证。
+
 ### 2026-11-05 · 0.5.0 操作流程与 MAC 绑定重构
 
 - 新增按端口自动计算 MAC 上限及手动覆盖、三种违规动作中文下拉框、批量粘贴及横线等格式整理。
 - 原 / 新 MAC 同页换绑，相邻安全变更合并，最终启用端口并在回读通过后自动写入启动配置；英文命令旁逐条附中文解释。
 - 整体改为选设备、选任务、填写、审核执行；普通操作无需加入队列，批量草稿可选，MAC 输入区与换绑区明确区分，页底固定下一步按钮。
-- 125 项检查通过，未做真机认证。源码为 0.5.0，原 0.4.1 GitHub 发行包保持不变。
+- 125 项检查通过，未做真机认证。源码与发行包版本为 0.5.0，历史 0.4.1 发行包保留。
 
 ### 2026-11-05 · 发布 0.4.1 与公开仓库
 
