@@ -10,6 +10,8 @@ public sealed record PendingChange(Guid Id, Guid DeviceId, string DeviceName, st
 public sealed record MemberHealthRow(int Id, string Role, string Status, string Cpu, string Memory, string Temperature, string Source);
 public sealed class MacDraftRow : Observable
 {
+    public MacBinding? OriginalBinding { get; init; }
+    public string OldAddress => OriginalBinding?.Address ?? "新增绑定";
     private string address = "", vlan = "10", portName = "";
     public string Address { get => address; set => Set(ref address, value); }
     public string Vlan { get => vlan; set => Set(ref vlan, value); }
@@ -61,9 +63,24 @@ public sealed partial class MainViewModel
     public ObservableCollection<PendingChange> PendingChanges { get; } = [];
     public ObservableCollection<MacDraftRow> MacRows { get; } = [];
     private readonly Dictionary<Guid, (string Hash, string Identity)> queueBaselines = [];
-    private readonly Dictionary<Guid, (string Address, string Vlan, string Port)[]> macRowDrafts = [];
-    private void SaveMacRows(Guid? id) { if (id is Guid key) macRowDrafts[key] = MacRows.Select(r => (r.Address, r.Vlan, r.PortName)).ToArray(); }
-    private void RestoreMacRows(Guid? id) { MacRows.Clear(); if (id is Guid key && macRowDrafts.TryGetValue(key, out var rows)) foreach (var r in rows) { AddRow(r.Port, r.Vlan); MacRows[^1].Address = r.Address; } }
+    private readonly Dictionary<Guid, (string Address, string Vlan, string Port, MacBinding? Original)[]> macRowDrafts = [];
+    private readonly Dictionary<Guid, (bool Auto, string Maximum, string Violation, MacBindingKind Kind, string PastePort, string PasteText)> macSettingsDrafts = [];
+    private void SaveMacRows(Guid? id)
+    {
+        if (id is not Guid key) return;
+        macRowDrafts[key] = MacRows.Select(r => (r.Address, r.Vlan, r.PortName, r.OriginalBinding)).ToArray();
+        macSettingsDrafts[key] = (MacAutomaticMaximum, macMaximum, SelectedMacViolation.Value, SelectedMacKind.Value, MacPastePort, MacPasteText);
+    }
+    private void RestoreMacRows(Guid? id)
+    {
+        MacRows.Clear();
+        var saved = id is Guid key && macSettingsDrafts.TryGetValue(key, out var settings) ? settings : (Auto: true, Maximum: "1", Violation: "shutdown", Kind: SelectedDevice?.Vendor == Vendor.Cisco ? MacBindingKind.SecureSource : MacBindingKind.StaticForwarding, PastePort: "", PasteText: "");
+        macAutomaticMaximum = saved.Auto; macMaximum = saved.Maximum; selectedMacViolation = MacViolations.Single(v => v.Value == saved.Violation);
+        selectedMacKind = MacKinds.Single(k => k.Value == saved.Kind); macPastePort = saved.PastePort; macPasteText = saved.PasteText;
+        if (id is Guid rowKey && macRowDrafts.TryGetValue(rowKey, out var rows)) foreach (var r in rows) { AddRow(r.Port, r.Vlan, r.Original); MacRows[^1].Address = r.Address; }
+        foreach (var name in new[] { nameof(SelectedMacKind), nameof(IsSecureMac), nameof(MacAutomaticMaximum), nameof(MacManualMaximum), nameof(SelectedMacViolation), nameof(MacViolationHelp), nameof(MacPastePort), nameof(MacPasteText) }) Changed(name);
+        MacEditorChanged();
+    }
     private ActionCommand[] workbenchCommands = [];
     public ActionCommand Navigate { get; private set; } = null!;
     public ActionCommand OpenDevice { get; private set; } = null!;
@@ -74,6 +91,9 @@ public sealed partial class MainViewModel
     public ActionCommand StageVlan { get; private set; } = null!;
     public ActionCommand StageMac { get; private set; } = null!;
     public ActionCommand StageDeleteMac { get; private set; } = null!;
+    public ActionCommand EditSelectedMac { get; private set; } = null!;
+    public ActionCommand FormatMacRows { get; private set; } = null!;
+    public ActionCommand ImportMacRows { get; private set; } = null!;
     public ActionCommand ReviewQueue { get; private set; } = null!;
     public ActionCommand RemovePending { get; private set; } = null!;
     public ActionCommand ResetPortField { get; private set; } = null!;
@@ -91,11 +111,14 @@ public sealed partial class MainViewModel
         BackToDevices = new(_ => ReturnToDevices(), () => IsDeviceWorkspace && !ReviewOpen);
         ClearDeviceFilter = new(_ => { Search = ""; DeviceGroup = "全部分组"; });
         OpenDeviceQueue = new(_ => { SelectedPending = PendingChanges.FirstOrDefault(p => p.DeviceId == SelectedDevice?.Id); Page = 4; }, () => DevicePendingCount > 0);
-        OpenDevice = new(p => { if (p is DeviceHealthRow row) SelectedDevice = Devices.First(d => d.Id == row.Device.Id); else if (p is Guid id) SelectedDevice = Devices.First(d => d.Id == id); Page = 2; DeviceFocused = true; Section = 0; }, () => SelectedDevice is not null && !IsApplying);
+        OpenDevice = new(p => { if (p is DeviceHealthRow row) SelectedDevice = Devices.First(d => d.Id == row.Device.Id); else if (p is Guid id) SelectedDevice = Devices.First(d => d.Id == id); Page = 2; DeviceFocused = true; Section = 0; TaskLanding = true; LastResult = ""; }, () => SelectedDevice is not null && !IsApplying);
         StagePorts = new(_ => Guard(() => { Stage(BuildPortRequest(), $"端口配置 · {Ports.Count(p => p.Picked)} 个端口"); loading = true; ApplyMode = ApplyPvid = ApplyAllowed = ApplyEnabled = ApplyDescription = CreateInlineVlan = false; loading = false; FillCurrentValues(); EditorOpen = false; NotifyQueue(); }), () => CanPreviewPorts && Ready);
         StageVlan = new(_ => Guard(() => Stage(BuildVlanRequest(), VlanAction.Label + " · VLAN " + VlanId)), () => CanConfigure && Ready && VlanValidation.Length == 0);
-        StageMac = new(_ => Guard(() => { var r = BuildMacRequest(); Stage(r, $"{SelectedMacKind.Label} · {r.AddMacBindings!.Length} 条"); MacRows.Clear(); MacBatch = ""; NotifyQueue(); }), () => CanConfigure && Ready && MacValidation.Length == 0);
-        StageDeleteMac = new(_ => Guard(() => Stage(new(RemoveMacBindings: MacBindings.Where(m => m.Picked).Select(m => m.Binding).ToArray()), "删除 MAC 绑定")), () => DeleteMac.CanExecute(null) && Ready);
+        StageMac = new(_ => Guard(() => { NormalizeMacDrafts(); var r = BuildMacRequest(); Stage(r, $"{SelectedMacKind.Label} · 新增 {r.AddMacBindings?.Length ?? 0} / 移除 {r.RemoveMacBindings?.Length ?? 0}"); MacRows.Clear(); MacBatch = ""; NotifyQueue(); }), () => CanConfigure && Ready && MacValidation.Length == 0);
+        StageDeleteMac = new(_ => Guard(() => Stage(BuildDeleteMacRequest(), "删除 MAC 绑定")), () => DeleteMac.CanExecute(null) && Ready);
+        EditSelectedMac = new(_ => Guard(LoadSelectedMac), () => CanConfigure && Ready && MacBindings.Any(m => m.Picked));
+        FormatMacRows = new(_ => Guard(NormalizeMacDrafts), () => MacRows.Count > 0 && Ready);
+        ImportMacRows = new(_ => RunMacEditorAction(ImportMacDrafts), () => CanConfigure && Ready && !string.IsNullOrWhiteSpace(MacPasteText));
         ReviewQueue = new(_ => Guard(ShowQueue), () => CanConfigure && Ready && PendingChanges.Any(p => p.DeviceId == SelectedDevice?.Id) && QueueValidation.Length == 0);
         RemovePending = new(p => { if (p is PendingChange item) { PendingChanges.Remove(item); InvalidatePlan(); if (!PendingChanges.Any(c => c.DeviceId == item.DeviceId)) queueBaselines.Remove(item.DeviceId); NotifyQueue(); } }, () => !IsApplying);
         ResetPortField = new(p => { switch (p?.ToString()) { case "mode": ApplyMode = false; break; case "pvid": ApplyPvid = false; CreateInlineVlan = false; break; case "allowed": ApplyAllowed = false; break; case "enabled": ApplyEnabled = false; break; case "description": ApplyDescription = false; break; } FillCurrentValues(); DraftChanged(); });
@@ -105,17 +128,18 @@ public sealed partial class MainViewModel
         StartMonitoring = new(_ => { observability?.RequestCollectorStop(false); CollectorStartRequested?.Invoke(); RefreshObservability(); });
         StopMonitoring = new(_ => { observability?.RequestCollectorStop(true); Status = "已请求停止后台采集，当前结果会保留并在过期后标记。"; });
         RefreshDashboard = new(_ => RefreshObservability());
-        workbenchCommands = [Navigate, OpenDevice, BackToDevices, ClearDeviceFilter, OpenDeviceQueue, StagePorts, StageVlan, StageMac, StageDeleteMac, ReviewQueue, RemovePending, ResetPortField, AddMacRow, RemoveMacRow, AcknowledgeAlarm, StartMonitoring, StopMonitoring, RefreshDashboard];
-        MacRows.CollectionChanged += (_, _) => { InvalidatePlan(); Changed(nameof(MacValidation)); RefreshWorkbenchCommands(); };
+        workbenchCommands = [Navigate, OpenDevice, BackToDevices, ClearDeviceFilter, OpenDeviceQueue, StagePorts, StageVlan, StageMac, StageDeleteMac, EditSelectedMac, FormatMacRows, ImportMacRows, ReviewQueue, RemovePending, ResetPortField, AddMacRow, RemoveMacRow, AcknowledgeAlarm, StartMonitoring, StopMonitoring, RefreshDashboard];
+        MacRows.CollectionChanged += (_, _) => MacEditorChanged();
         PropertyChanged += (_, e) => { if (e.PropertyName == nameof(SelectedDevice)) { foreach (var name in new[] { nameof(PageTitle), nameof(PageSubtitle), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(CurrentHealth), nameof(MetricsHint), nameof(MemberHealthRows), nameof(HasMemberHealth), nameof(QueueValidation), nameof(AvailableVlans), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint) }) Changed(name); } };
         RefreshObservability();
+        InitializeGuidedWorkflow();
     }
-    private void AddRow(string port, string vlan)
-    { var row = new MacDraftRow { PortName = port, Vlan = vlan }; row.PropertyChanged += (_, _) => { InvalidatePlan(); Changed(nameof(MacValidation)); RefreshWorkbenchCommands(); }; MacRows.Add(row); }
-    private int page;
+    private void AddRow(string port, string vlan, MacBinding? original = null)
+    { var row = new MacDraftRow { PortName = port, Vlan = vlan, OriginalBinding = original }; row.PropertyChanged += (_, _) => MacEditorChanged(); MacRows.Add(row); }
+    private int page = 2;
     public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } } }
-    public string PageTitle => Page switch { 1 => "网络拓扑", 2 => DeviceFocused ? SelectedDevice?.Name ?? "设备工作区" : "设备中心", 3 => "告警与事件", 4 => "待提交变更", 5 => "系统设置", _ => "网络总览" };
-    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "查找设备，进入工作区查看状态或编辑配置", 3 => "持续异常、恢复时间和处理记录", 4 => "按设备组织修改，审核后备份、执行与验证", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
+    public string PageTitle => Page switch { 1 => "网络拓扑", 2 => DeviceFocused ? SelectedDevice?.Name ?? "设备工作区" : "设备中心", 3 => "告警与事件", 4 => "批量草稿", 5 => "系统设置", _ => "网络总览" };
+    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "选择设备 → 选择操作 → 填写配置 → 审核执行", 3 => "持续异常、恢复时间和处理记录", 4 => "可选功能：把同一设备的多项配置一起审核和执行", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
     private bool deviceFocused;
     public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } }
     public bool IsDeviceWorkspace => Page == 2 && DeviceFocused;
@@ -125,12 +149,12 @@ public sealed partial class MainViewModel
     public string[] PortNames => Ports.Select(p => p.State.Name).ToArray();
     public VlanState[] AvailableVlans => ProjectedState()?.Vlans ?? Vlans.ToArray();
     public string ConnectionStage => Busy ? Operation : CanConfigure ? "配置基线已就绪" : SelectedDevice?.IsSimulation == true ? "模拟设备 · 等待读取" : "尚未建立配置基线";
-    public string QueueLabel => $"待提交 {PendingChanges.Count} 组";
+    public string QueueLabel => $"批量草稿 {PendingChanges.Count} 组";
     public bool HasPendingChanges => PendingChanges.Count > 0;
     public int DevicePendingCount => PendingChanges.Count(p => p.DeviceId == SelectedDevice?.Id);
     public string DeviceQueueLabel => $"审核本机变更（{DevicePendingCount} 组） →";
     public string ReadCurrentLabel => CanConfigure ? "重新读取配置" : "读取设备配置";
-    public string NextStepHint => Busy ? Operation : !SupportsConfiguration ? CapabilityHint : !CanConfigure ? "下一步：读取设备配置后，可编辑端口、VLAN 和 MAC。" : DevicePendingCount > 0 ? $"本机有 {DevicePendingCount} 组待提交变更，可继续编辑或前往审核。" : "下一步：进入端口、VLAN 或 MAC 页面编辑，修改后统一审核。";
+    public string NextStepHint => Busy ? Operation : !SupportsConfiguration ? CapabilityHint : !CanConfigure ? "先选择要做的事；修改配置前点击“读取设备配置”。" : TaskLanding ? "配置已读取，请在下方选择要完成的操作。" : "填写完成后，点击当前页“下一步：审核并执行”。";
     public bool HasMemberHealth => MemberHealthRows.Length > 0;
     public string QueueValidation
     {
@@ -205,12 +229,12 @@ public sealed partial class MainViewModel
     {
         var device = RequireDevice(); var state = workspace.GetState(device.Id)!;
         if (!queueBaselines.TryGetValue(device.Id, out var baseline) || baseline.Hash != ChangeEngine.Hash(state) || baseline.Identity != ChangeEngine.IdentityHash(device)) throw new InvalidOperationException("待提交基线已变化，请移除旧变更并重新核对。");
-        plan = engine.PreviewMany(device, PendingChanges.Where(p => p.DeviceId == device.Id).Select(p => p.Request).ToArray()); PlanConfirmed = false; LiveRiskAccepted = false;
-        foreach (var name in new[] { nameof(PlanDifferences), nameof(PlanCommands), nameof(PlanRisks), nameof(PlanTitle), nameof(IsLivePlan) }) Changed(name);
+        plan = engine.PreviewMany(device, PendingChanges.Where(p => p.DeviceId == device.Id).Select(p => p.Request).ToArray()); reviewIncludesCurrent = false; PlanConfirmed = false; LiveRiskAccepted = false;
+        NotifyPlan();
         ReviewOpen = true; RefreshCommands();
     }
     private void NotifyQueue()
-    { foreach (var name in new[] { nameof(QueueLabel), nameof(HasPendingChanges), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint), nameof(QueueValidation), nameof(AvailableVlans), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation) }) Changed(name); RefreshWorkbenchCommands(); }
+    { foreach (var name in new[] { nameof(QueueLabel), nameof(HasPendingChanges), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint), nameof(QueueValidation), nameof(AvailableVlans), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(MacMaximum), nameof(MacCountSummary) }) Changed(name); RefreshWorkbenchCommands(); }
     private void RefreshWorkbenchCommands() { foreach (var command in workbenchCommands) command.Refresh(); }
     public void RefreshObservability()
     {

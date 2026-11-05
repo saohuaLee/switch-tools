@@ -1,4 +1,4 @@
-<Window x:Class="NetOps.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:NetOps.Desktop" Title="网络运维工作台 · NetOps Studio 0.4.1" Style="{StaticResource {x:Type Window}}" Width="1480" Height="920" MinWidth="1180" MinHeight="740" WindowStartupLocation="CenterScreen" Language="zh-CN">
+<Window x:Class="NetOps.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:NetOps.Desktop" Title="网络运维工作台 · NetOps Studio 0.5.0" Style="{StaticResource {x:Type Window}}" Width="1480" Height="920" MinWidth="1180" MinHeight="740" WindowStartupLocation="CenterScreen" Language="zh-CN">
   <Window.InputBindings>
     <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackToDevices}" />
   </Window.InputBindings>
@@ -24,6 +24,12 @@
               <TextBlock Text="NETOPS STUDIO" FontSize="9" Foreground="#94A3B8" Margin="0,3,0,0" />
             </StackPanel>
           </StackPanel>
+          <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=2, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="2">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="" FontFamily="Segoe MDL2 Assets" Width="28" FontSize="16" />
+              <TextBlock Text="设备中心" />
+            </StackPanel>
+          </RadioButton>
           <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=0, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="0">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="" FontFamily="Segoe MDL2 Assets" Width="28" FontSize="16" />
@@ -36,12 +42,6 @@
               <TextBlock Text="网络拓扑" />
             </StackPanel>
           </RadioButton>
-          <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=2, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="2">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="" FontFamily="Segoe MDL2 Assets" Width="28" FontSize="16" />
-              <TextBlock Text="设备中心" />
-            </StackPanel>
-          </RadioButton>
           <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=3, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="3">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="" FontFamily="Segoe MDL2 Assets" Width="28" FontSize="16" />
@@ -51,7 +51,7 @@
           <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=4, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="4">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="" FontFamily="Segoe MDL2 Assets" Width="28" FontSize="16" />
-              <TextBlock Text="待提交变更" />
+              <TextBlock Text="批量草稿（可选）" />
             </StackPanel>
           </RadioButton>
           <RadioButton Style="{StaticResource NavItem}" GroupName="Navigation" IsChecked="{Binding Page, Converter={StaticResource Equals}, ConverterParameter=5, Mode=OneWay}" Command="{Binding Navigate}" CommandParameter="5">
@@ -65,7 +65,7 @@
           <Border Background="#F5F8FD" Padding="12" CornerRadius="8">
             <StackPanel>
               <TextBlock Text="{Binding CollectorLabel}" Foreground="#64748B" FontSize="11" />
-              <TextBlock Text="版本 0.4.1 · 设备工作区" Foreground="#94A3B8" FontSize="10" Margin="0,6,0,0" />
+              <TextBlock Text="版本 0.5.0 · 设备工作区" Foreground="#94A3B8" FontSize="10" Margin="0,6,0,0" />
             </StackPanel>
           </Border>
         </StackPanel>
@@ -262,12 +262,12 @@
                     <Button Content="＋ 添加设备" Click="AddDeviceClick" Style="{StaticResource Primary}" Margin="0" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="设备清单" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="从这里开始：先选一台设备" FontSize="19" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding DeviceCountLabel}" Foreground="#64748B" Margin="14,0,0,0" />
                   </StackPanel>
                 </DockPanel>
                 <DockPanel>
-                  <TextBlock DockPanel.Dock="Right" Text="双击设备行或点击「进入设备」" Foreground="#94A3B8" FontSize="11" />
+                  <TextBlock DockPanel.Dock="Right" Text="选设备 → 选操作 → 填写 → 审核执行" Foreground="#64748B" FontSize="12" />
                   <TextBlock DockPanel.Dock="Left" Text="搜索" Foreground="#64748B" Margin="0,0,10,0" />
                   <TextBox DockPanel.Dock="Left" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Width="245" Margin="0,0,12,0" ToolTip="设备名称、管理地址、厂商、型号或分组" AutomationProperties.Name="搜索设备" />
                   <ComboBox DockPanel.Dock="Left" Width="150" ItemsSource="{Binding DeviceGroups}" SelectedItem="{Binding DeviceGroup}" Margin="0,0,8,0" AutomationProperties.Name="设备分组筛选" />
@@ -302,7 +302,7 @@
                   <DataGridTemplateColumn Header="操作" Width="110">
                     <DataGridTemplateColumn.CellTemplate>
                       <DataTemplate>
-                        <Button Content="进入设备 →" Command="{Binding DataContext.OpenDevice, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Background="#EFF5FF" BorderBrush="#D9E6FF" Foreground="#1D4ED8" Padding="10,5" Margin="0" />
+                        <Button Content="选择操作 →" Command="{Binding DataContext.OpenDevice, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Background="#EFF5FF" BorderBrush="#D9E6FF" Foreground="#1D4ED8" Padding="10,5" Margin="0" />
                       </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                   </DataGridTemplateColumn>
@@ -318,6 +318,7 @@
           </Grid>
           <Grid Visibility="{Binding DeviceFocused, Converter={StaticResource BoolVisibility}}">
             <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
               <RowDefinition />
             </Grid.RowDefinitions>
@@ -346,7 +347,7 @@
                   <Border DockPanel.Dock="Left" Background="#F1F5F9" CornerRadius="5" Padding="9,5" Margin="0,0,12,0"><TextBlock Text="{Binding CurrentHealth.StatusLabel}" Foreground="{Binding CurrentHealth.StatusColor}" FontSize="11" FontWeight="SemiBold" /></Border>
                   <TextBlock Text="{Binding DeviceSummary}" Foreground="#64748B" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding DeviceSummary}" />
                 </DockPanel>
-                <DockPanel>
+                <DockPanel Visibility="{Binding ConnectionControlsVisible, Converter={StaticResource BoolVisibility}}">
                   <TextBlock DockPanel.Dock="Left" Text="连接配置" Foreground="#475569" Margin="0,0,12,0" />
                   <ComboBox DockPanel.Dock="Left" Width="210" ItemsSource="{Binding Connections}" SelectedItem="{Binding SelectedConnection}" DisplayMemberPath="Label" Margin="0,0,10,0" AutomationProperties.Name="设备连接配置" />
                   <Button DockPanel.Dock="Left" Content="{Binding ReadCurrentLabel}" Command="{Binding ReadCurrent}" Style="{StaticResource Primary}" Margin="0,0,16,0" />
@@ -358,7 +359,31 @@
                 </DockPanel>
               </StackPanel>
             </Border>
-            <TabControl Grid.Row="1" x:Name="WorkspaceTabs" SelectedIndex="{Binding Section}" Style="{StaticResource WorkspaceTabs}">
+            <StackPanel Grid.Row="1" Margin="0,0,0,12">
+              <DockPanel Visibility="{Binding TaskFormVisible, Converter={StaticResource BoolVisibility}}">
+                <Button DockPanel.Dock="Left" Content="← 选择其他操作" Command="{Binding BackToTasks}" Margin="0,0,16,0" />
+                <StackPanel><TextBlock Text="{Binding TaskTitle}" FontSize="20" FontWeight="SemiBold" /><TextBlock Text="{Binding TaskInstructions}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,5,0,0" /></StackPanel>
+              </DockPanel>
+              <Border Background="#EAF7F0" BorderBrush="#BEE3CF" BorderThickness="1" Padding="14,10" CornerRadius="8" Margin="0,10,0,0" Visibility="{Binding HasLastResult, Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding LastResult}" Foreground="#176746" /></Border>
+            </StackPanel>
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Visibility="{Binding TaskLanding, Converter={StaticResource BoolVisibility}}">
+              <StackPanel>
+                <TextBlock Text="你想在这台设备上做什么？" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,8" />
+                <TextBlock Text="选择下面一项操作。填写完成后直接审核执行，无需先去其他页面提交。" Style="{StaticResource MutedText}" Margin="0,0,0,18" />
+                <UniformGrid Columns="2">
+                  <Button Command="{Binding ChooseTask}" CommandParameter="6" HorizontalContentAlignment="Stretch" Padding="20" Margin="0,0,14,14" Background="#EFF5FF" BorderBrush="#C9DAFA"><StackPanel><TextBlock Text="绑定 / 更换 MAC 地址" FontSize="18" FontWeight="SemiBold" Foreground="#1D4ED8" /><TextBlock Text="选择端口，输入一个或多个 MAC；自动识别格式和数量。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                  <Button Command="{Binding ChooseTask}" CommandParameter="1" HorizontalContentAlignment="Stretch" Padding="20" Margin="0,0,0,14"><StackPanel><TextBlock Text="修改端口配置" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="修改 VLAN、端口描述、接入 / 干道模式或启停状态。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                  <Button Command="{Binding ChooseTask}" CommandParameter="2" HorizontalContentAlignment="Stretch" Padding="20" Margin="0,0,14,14"><StackPanel><TextBlock Text="创建 / 管理 VLAN" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="创建 VLAN、修改名称或删除不再使用的 VLAN。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                  <Button Command="{Binding ChooseTask}" CommandParameter="3" HorizontalContentAlignment="Stretch" Padding="20" Margin="0,0,0,14"><StackPanel><TextBlock Text="备份与操作记录" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="备份当前配置，查看历史快照和操作结果。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                  <Button Command="{Binding ChooseTask}" CommandParameter="0" HorizontalContentAlignment="Stretch" Padding="20" Margin="0,0,14,0"><StackPanel><TextBlock Text="查看运行状态" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="查看 CPU、内存、温度及堆叠成员监控。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                  <Button Command="{Binding ChooseTask}" CommandParameter="4" HorizontalContentAlignment="Stretch" Padding="20" Margin="0"><StackPanel><TextBlock Text="手动命令终端" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="高级操作：通过 SSH、Console 或 Telnet 手动配置。" Foreground="#64748B" Margin="0,9,0,0" /></StackPanel></Button>
+                </UniformGrid>
+              </StackPanel>
+            </ScrollViewer>
+            <Border Grid.Row="2" Style="{StaticResource Card}" VerticalAlignment="Top" Visibility="{Binding NeedsTaskRead, Converter={StaticResource BoolVisibility}}">
+              <StackPanel Margin="12"><TextBlock Text="开始前，先读取这台设备的当前配置" FontSize="20" FontWeight="SemiBold" /><TextBlock Text="读取后会显示可操作的真实端口、VLAN 和已有 MAC，随后继续当前操作。读取过程不会修改设备配置。" Style="{StaticResource MutedText}" Margin="0,12,0,20" /><Button Content="读取配置，继续这项操作 →" Command="{Binding ReadCurrent}" Style="{StaticResource Primary}" HorizontalAlignment="Left" /><TextBlock Text="{Binding CapabilityHint}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,12,0,0" /></StackPanel>
+            </Border>
+            <TabControl Grid.Row="2" x:Name="WorkspaceTabs" SelectedIndex="{Binding Section}" Style="{StaticResource PageTabs}" Visibility="{Binding TaskContentVisible, Converter={StaticResource BoolVisibility}}">
               <TabItem Header="运行状态">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                   <StackPanel>
@@ -440,7 +465,8 @@
                   </Grid.RowDefinitions>
                   <DockPanel Margin="0,0,0,12">
                     <Button DockPanel.Dock="Right" Content="编辑所选端口" Command="{Binding EditPorts}" Style="{StaticResource Primary}" />
-                    <TextBlock Text="{Binding InventorySummary}" Style="{StaticResource MutedText}" />
+                    <Button DockPanel.Dock="Right" Content="给所选端口绑定 MAC" Command="{Binding BindSelectedPorts}" />
+                    <StackPanel><TextBlock Text="点击端口即可勾选，可同时选择多个端口" FontWeight="SemiBold" /><TextBlock Text="{Binding InventorySummary}" Style="{StaticResource MutedText}" FontSize="11" Margin="0,5,0,0" /></StackPanel>
                   </DockPanel>
                   <TabControl Grid.Row="1">
                     <TabItem Header="端口面板">
@@ -562,7 +588,7 @@
                         </StackPanel>
                       </Grid>
                       <TextBlock Text="{Binding VlanValidation}" Foreground="#B45309" FontSize="12" Margin="0,0,0,8" />
-                      <Button Content="加入待提交变更" Command="{Binding StageVlan}" HorizontalAlignment="Right" Style="{StaticResource Primary}" Margin="0" />
+                      <WrapPanel HorizontalAlignment="Right"><Button Content="存为批量草稿" Command="{Binding StageVlan}" Style="{StaticResource Quiet}" /><Button Content="下一步：审核并执行 →" Command="{Binding ReviewVlanOperation}" Style="{StaticResource Primary}" Margin="0" /></WrapPanel>
                     </StackPanel>
                   </Border>
                 </Grid>
@@ -635,68 +661,7 @@
                 </Grid>
               </TabItem>
               <TabItem Visibility="Collapsed" />
-              <TabItem Header="MAC 绑定">
-                <Grid>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="160" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition />
-                    <RowDefinition Height="Auto" />
-                  </Grid.RowDefinitions>
-                  <DockPanel Margin="0,0,0,12">
-                    <Button DockPanel.Dock="Right" Content="移除勾选绑定 → 待提交" Command="{Binding StageDeleteMac}" />
-                    <TextBlock Text="当前 MAC 绑定" FontSize="15" FontWeight="SemiBold" />
-                  </DockPanel>
-                  <DataGrid Grid.Row="1" ItemsSource="{Binding MacBindings}">
-                    <DataGrid.Columns>
-                      <DataGridTemplateColumn Header="选择" Width="54">
-                        <DataGridTemplateColumn.CellTemplate>
-                          <DataTemplate>
-                            <CheckBox IsChecked="{Binding Picked, UpdateSourceTrigger=PropertyChanged}" Margin="0" HorizontalAlignment="Center" />
-                          </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                      </DataGridTemplateColumn>
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="MAC 地址" Binding="{Binding Binding.Address}" Width="170" />
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="VLAN" Binding="{Binding Binding.VlanId}" Width="70" />
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="完整端口" Binding="{Binding Binding.PortName}" Width="*" />
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="用途" Binding="{Binding Binding.KindLabel}" Width="130" />
-                    </DataGrid.Columns>
-                  </DataGrid>
-                  <DockPanel Grid.Row="2" Margin="0,20,0,8">
-                    <Button DockPanel.Dock="Right" Content="添加映射行" Command="{Binding AddMacRow}" />
-                    <ComboBox DockPanel.Dock="Right" Width="245" ItemsSource="{Binding MacKinds}" SelectedItem="{Binding SelectedMacKind}" DisplayMemberPath="Label" Margin="0,0,12,0" />
-                    <TextBlock Text="新增绑定映射" FontSize="15" FontWeight="SemiBold" />
-                  </DockPanel>
-                  <DataGrid Grid.Row="3" x:Name="MacDraftGrid" ItemsSource="{Binding MacRows}" IsReadOnly="False">
-                    <DataGrid.Columns>
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="MAC 地址" Binding="{Binding Address, UpdateSourceTrigger=PropertyChanged}" Width="170" />
-                      <DataGridTextColumn ElementStyle="{StaticResource GridCellText}" Header="VLAN" Binding="{Binding Vlan, UpdateSourceTrigger=PropertyChanged}" Width="70" />
-                      <DataGridTemplateColumn Header="目标端口" Width="*">
-                        <DataGridTemplateColumn.CellTemplate>
-                          <DataTemplate>
-                            <ComboBox ItemsSource="{Binding DataContext.PortNames, RelativeSource={RelativeSource AncestorType=Window}}" SelectedItem="{Binding PortName, UpdateSourceTrigger=PropertyChanged}" Margin="4,1" />
-                          </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                      </DataGridTemplateColumn>
-                      <DataGridTemplateColumn Header="" Width="70">
-                        <DataGridTemplateColumn.CellTemplate>
-                          <DataTemplate>
-                            <Button Content="移除" Style="{StaticResource Quiet}" Command="{Binding DataContext.RemoveMacRow, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Padding="8,2" MinHeight="28" Margin="0" />
-                          </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                      </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                  </DataGrid>
-                  <DockPanel Grid.Row="4" Margin="0,12,0,0">
-                    <Button DockPanel.Dock="Right" Content="加入待提交变更" Click="StageMacClick" Style="{StaticResource Primary}" />
-                    <StackPanel>
-                      <TextBlock Text="{Binding MacValidation}" Foreground="#B45309" FontSize="12" />
-                      <TextBlock Text="静态转发与源 MAC 白名单分别配置；所选端口可自动生成映射行" Style="{StaticResource MutedText}" FontSize="11" />
-                    </StackPanel>
-                  </DockPanel>
-                </Grid>
-              </TabItem>
+              <TabItem Header="MAC 绑定"><local:MacBindingPanel /></TabItem>
               <TabItem Visibility="Collapsed" />
             </TabControl>
           </Grid>
@@ -910,14 +875,15 @@
             </Grid>
           </ScrollViewer>
           <DockPanel Grid.Row="2" Margin="0,22,0,0">
-            <Button DockPanel.Dock="Right" Content="加入待提交变更" Command="{Binding StagePorts}" Style="{StaticResource Primary}" Margin="16,0,0,0" />
+            <Button DockPanel.Dock="Right" Content="下一步：审核并执行 →" Command="{Binding ReviewPortOperation}" Style="{StaticResource Primary}" Margin="16,0,0,0" />
+            <Button DockPanel.Dock="Right" Content="存为批量草稿" Command="{Binding StagePorts}" Style="{StaticResource Quiet}" />
             <TextBlock Text="{Binding PortValidation}" Foreground="#B45309" FontSize="12" />
           </DockPanel>
         </Grid>
       </Border>
     </Grid>
     <Grid Grid.RowSpan="3" Grid.ColumnSpan="2" Background="#8021334D" Visibility="{Binding ReviewOpen, Converter={StaticResource BoolVisibility}}" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">
-      <Border Background="#FFFFFF" BorderBrush="#D8E0EB" BorderThickness="1" Width="730" HorizontalAlignment="Center" Margin="28" Padding="20" CornerRadius="8">
+      <Border Background="#FFFFFF" BorderBrush="#D8E0EB" BorderThickness="1" Width="960" HorizontalAlignment="Center" Margin="28" Padding="20" CornerRadius="8">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -927,6 +893,7 @@
           <StackPanel>
             <TextBlock Text="审核本次变更" FontSize="22" FontWeight="SemiBold" />
             <TextBlock Text="{Binding PlanTitle}" Style="{StaticResource MutedText}" Margin="0,6,0,12" />
+            <TextBlock Text="{Binding ReviewScope}" Foreground="#1D4ED8" FontSize="12" Margin="0,0,0,12" />
           </StackPanel>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,10,0">
@@ -945,8 +912,17 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <TextBlock Text="{Binding PlanRisks}" Foreground="#B45309" Margin="0,16,0,12" />
-              <Expander Header="查看厂商命令" Foreground="#64748B">
-                <TextBox Text="{Binding PlanCommands, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" MaxHeight="240" VerticalContentAlignment="Top" />
+              <Expander Header="厂商命令及中文解释" IsExpanded="True" Foreground="#64748B">
+                <DataGrid ItemsSource="{Binding PlanCommandRows}" MaxHeight="300" RowHeight="NaN">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Header="英文命令" Binding="{Binding Command, Mode=OneWay}" Width="*">
+                      <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="FontFamily" Value="Consolas" /><Setter Property="TextWrapping" Value="Wrap" /><Setter Property="Margin" Value="8,7" /></Style></DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="中文解释" Binding="{Binding Explanation, Mode=OneWay}" Width="*">
+                      <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /><Setter Property="Margin" Value="8,7" /></Style></DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                  </DataGrid.Columns>
+                </DataGrid>
               </Expander>
             </StackPanel>
           </ScrollViewer>
@@ -956,8 +932,9 @@
               <CheckBox IsChecked="{Binding LiveRiskAccepted}">
                 <TextBlock Text="我了解这是实验性真实设备配置，已确认带外恢复途径；失败可能部分生效。" />
               </CheckBox>
-              <CheckBox Content="回读验证通过后保存到启动配置" IsChecked="{Binding SaveAfterVerify}" />
+              <CheckBox Content="回读验证通过后保存到启动配置" IsChecked="{Binding SaveAfterVerify}" IsEnabled="{Binding CanChooseSave}" />
             </StackPanel>
+            <TextBlock Text="端口安全变更验证通过后自动执行 write memory（写入启动配置）；模拟设备只验证流程。" Style="{StaticResource MutedText}" FontSize="12" Visibility="{Binding IsSecurityPlan, Converter={StaticResource BoolVisibility}}" />
             <TextBlock Text="{Binding Operation}" Foreground="{StaticResource Accent}" Margin="0,4,0,8" />
             <WrapPanel HorizontalAlignment="Right">
               <Button Content="返回继续编辑" Command="{Binding CloseReview}" />

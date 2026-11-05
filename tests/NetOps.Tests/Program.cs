@@ -91,6 +91,7 @@ await AsyncTest("SSH 在联网前拒绝缺少指纹的真实设备", async () =>
 });
 
 await WorkflowChecks.Run(root, Test, AsyncTest);
+await MacBindingChecks.Run(root, Test, AsyncTest);
 await ImportChecks.Run(root, Test, AsyncTest);
 await ObservabilityChecks.Run(root, Test, AsyncTest);
 DesktopLayoutChecks.Run(device, Test);

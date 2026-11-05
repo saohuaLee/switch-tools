@@ -64,19 +64,27 @@ public sealed class CliPreviewDriver(Vendor vendor) : IDeviceDriver
             if (request.Enabled is bool enabled) commands.Add(enabled ? (IsVrp ? "undo shutdown" : "no shutdown") : "shutdown");
             commands.Add(IsVrp ? "quit" : "exit");
         }
-        foreach (var name in MacRules.SecurityChanges(request))
+        var securityPorts = MacRules.SecurityChanges(request);
+        void RemoveSecure(string name)
+        {
+            commands.Add($"interface {name}"); commands.Add("shutdown"); commands.Add("switchport mode access");
+            foreach (var b in (request.RemoveMacBindings ?? []).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name)) commands.Add($"no switchport port-security mac-address {MacRules.VendorAddress(b.Address, false)}");
+        }
+        if (securityPorts.Length > 1)
+            foreach (var name in securityPorts) { RemoveSecure(name); commands.Add("exit"); }
+        foreach (var name in securityPorts)
         {
             if (vendor != Vendor.Cisco || baseline is null) throw new NotSupportedException("源 MAC 白名单需要 Cisco IOS / IOS XE 和已读取的基线。");
             var bindings = MacRules.TargetBindings(baseline, request).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name).ToArray();
-            commands.Add($"interface {name}"); commands.Add("shutdown");
-            foreach (var b in (request.RemoveMacBindings ?? []).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name)) commands.Add($"no switchport port-security mac-address {MacRules.VendorAddress(b.Address, false)}");
+            if (securityPorts.Length == 1) RemoveSecure(name); else commands.Add($"interface {name}");
             if (bindings.Length > 0)
             {
-                commands.Add("switchport port-security"); commands.Add($"switchport port-security maximum {bindings.Length}"); commands.Add("switchport port-security violation restrict");
+                var policy = MacRules.TargetSecurity(baseline, request).Single(p => p.PortName == name);
+                commands.Add("switchport port-security"); commands.Add($"switchport port-security maximum {policy.Maximum}"); commands.Add($"switchport port-security violation {policy.Violation}");
                 foreach (var b in (request.AddMacBindings ?? []).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name)) commands.Add($"switchport port-security mac-address {MacRules.VendorAddress(b.Address, false)}");
             }
             else { commands.Add("no switchport port-security"); commands.Add("no switchport port-security maximum"); commands.Add("no switchport port-security violation"); }
-            if (baseline.Ports.Single(p => p.Name == name).Enabled) commands.Add("no shutdown");
+            commands.Add("no shutdown");
             commands.Add("exit");
         }
         commands.Add(IsVrp ? "return" : "end");

@@ -58,7 +58,7 @@ public sealed partial class CliConversation(IDeviceSession session) : IAsyncDisp
     [GeneratedRegex(@"^(?:<[\w.-]+>|\[[\w./~*() -]+\]|[\w.-]+(?:\([^\r\n)]*\))?[>#])\s*$")] private static partial Regex Prompt();
     [GeneratedRegex(@"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))")] private static partial Regex Ansi();
     [GeneratedRegex(@"--+\s*More\s*--+", RegexOptions.IgnoreCase)] private static partial Regex Pager();
-    [GeneratedRegex(@"(?im)^\s*(?:%\s*(?:Invalid|Error|Unknown|Incomplete|Ambiguous|Permission)|Error:|Unrecognized command|.*(?:permission denied|insufficient privilege))")] private static partial Regex CommandError();
+    [GeneratedRegex(@"(?im)^\s*(?:%\s*(?:Invalid|Error|Unknown|Incomplete|Ambiguous|Permission|Cannot|Unable|Failed|Maximum|The maximum|Found duplicate|Security violation)|Error:|Unrecognized command|.*(?:permission denied|insufficient privilege))")] private static partial Regex CommandError();
 }
 
 public static partial class ConfigurationParser
@@ -252,7 +252,7 @@ public sealed class NetworkOperations(IWorkspace workspace, IDriverRegistry driv
             if (ChangeEngine.ConfigurationHash(after) != ChangeEngine.ConfigurationHash(target)) throw new InvalidOperationException("下发后配置与目标不一致，可能已部分生效，请检查备份和终端；未执行自动回滚。");
             workspace.SaveState(after);
             var message = "下发与回读验证通过，尚未保存到启动配置。";
-            if (save)
+            if (save || ChangeEngine.Requests(plan).Any(r => MacRules.SecurityChanges(r).Length > 0))
             {
                 progress.Report("保存到启动配置…");
                 try { await cli.ExecuteAsync(SaveCommand(device.Vendor), ct); message = "下发成功、回读验证通过，设备保存命令已成功返回。"; }

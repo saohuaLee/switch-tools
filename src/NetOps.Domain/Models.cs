@@ -14,9 +14,10 @@ public enum MacBindingKind { StaticForwarding, SecureSource }
 
 public sealed record MacBinding(string Address, int VlanId, string PortName, MacBindingKind Kind = MacBindingKind.StaticForwarding)
 {
-    [JsonIgnore] public string KindLabel => Kind == MacBindingKind.StaticForwarding ? "静态转发" : "源 MAC 白名单";
+    [JsonIgnore] public string KindLabel => Kind == MacBindingKind.StaticForwarding ? "静态转发" : "端口安全绑定";
 }
 public sealed record PortSecurityState(string PortName, bool Enabled = false, int Maximum = 1, string Violation = "shutdown", bool HasUnsupportedOptions = false);
+public sealed record PortSecuritySettings(string PortName, int Maximum = 1, string Violation = "shutdown");
 public sealed record StackMemberState(int Id, string Role, string Status, string? Model = null, string? Identity = null, int? PortCount = null, bool? Online = null);
 
 public sealed record ConnectionProfile(Guid Id, string Name, ConnectionProtocol Protocol = ConnectionProtocol.Ssh,
@@ -79,7 +80,8 @@ public sealed record DeviceState(Guid DeviceId, int Revision, PortState[] Ports,
 public sealed record ChangeRequest(int? CreateVlanId = null, string? VlanName = null,
     string[]? Ports = null, PortMode? Mode = null, int? Pvid = null,
     int[]? TaggedVlans = null, bool? Enabled = null, string? Description = null,
-    int? RenameVlanId = null, int? DeleteVlanId = null, MacBinding[]? AddMacBindings = null, MacBinding[]? RemoveMacBindings = null);
+    int? RenameVlanId = null, int? DeleteVlanId = null, MacBinding[]? AddMacBindings = null, MacBinding[]? RemoveMacBindings = null,
+    PortSecuritySettings[]? SecuritySettings = null);
 public sealed record PlanDiff(string Target, string Before, string After)
 {
     public override string ToString() => $"{Target}：{Before} → {After}";

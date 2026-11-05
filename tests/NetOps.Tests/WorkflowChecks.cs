@@ -211,15 +211,15 @@ public static class WorkflowChecks
                 Check(ChangeEngine.ConfigurationHash(parsed) != ChangeEngine.ConfigurationHash(parsed with { MacBindings = [] }));
             }
         });
-        test("源 MAC 白名单与静态转发分离，绑定数即安全上限", () =>
+        test("端口安全与静态转发分离，默认上限 1 且违规关闭", () =>
         {
             var d = MakeReal() with { Id = Guid.NewGuid(), IsSimulation = true }; DemoWorkspace.Add(db, d); var e = new ChangeEngine(db, drivers);
             var b = new MacBinding("00:11:22:33:44:55", 10, "GigabitEthernet1/0/1", MacBindingKind.SecureSource); var p = e.Preview(d, new(AddMacBindings: [b]));
-            Check(p.Commands.Contains("switchport port-security maximum 1") && p.Commands.Contains("switchport port-security violation restrict")); Check(Array.IndexOf(p.Commands, "shutdown") < Array.IndexOf(p.Commands, "switchport port-security")); Check(p.Commands.Contains("no shutdown")); e.ApplySimulation(p.Id, true);
+            Check(p.Commands.Contains("switchport port-security maximum 1") && p.Commands.Contains("switchport port-security violation shutdown")); Check(Array.IndexOf(p.Commands, "shutdown") < Array.IndexOf(p.Commands, "switchport port-security")); Check(p.Commands.Contains("no shutdown")); e.ApplySimulation(p.Id, true);
             Check(db.GetState(d.Id)!.PortSecurity!.Single().Enabled); Reject(() => e.Preview(d, new(Ports: [b.PortName], Pvid: 20)));
             p = e.Preview(d, new(RemoveMacBindings: [b])); Check(p.Commands.Contains("no switchport port-security")); e.ApplySimulation(p.Id, true); Check(db.GetState(d.Id)!.PortSecurity!.Length == 0);
             Reject(() => e.Preview(d with { Vendor = Vendor.Huawei }, new(AddMacBindings: [b])));
-            db.SaveState(db.GetState(d.Id)! with { PortSecurity = [new(b.PortName, true, 5, "shutdown")] }); Reject(() => e.Preview(d, new(AddMacBindings: [b])));
+            db.SaveState(db.GetState(d.Id)! with { PortSecurity = [new(b.PortName, true, 5, "shutdown", true)] }); Reject(() => e.Preview(d, new(AddMacBindings: [b])));
         });
         await asyncTest("真实 MAC 回读遗漏或安全策略未生效时不保存", async () =>
         {

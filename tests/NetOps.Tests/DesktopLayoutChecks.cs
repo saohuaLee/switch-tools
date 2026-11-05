@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Threading;
+using System.Windows.Media;
 using NetOps.Desktop;
 using NetOps.Domain;
 
@@ -36,6 +37,13 @@ public static class DesktopLayoutChecks
                     }
                     Render(device with { Name = "排版测试交换机", ManagementIp = "192.0.2.99", IsSimulation = true });
                     Render(device with { Name = "另一台排版测试交换机", ManagementIp = "192.0.2.100", IsSimulation = false });
+                    var macPanel = new MacBindingPanel();
+                    macPanel.Measure(new Size(900, 360)); macPanel.Arrange(new Rect(0, 0, 900, 360)); macPanel.UpdateLayout();
+                    IEnumerable<DependencyObject> Descendants(DependencyObject root)
+                    { for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) { var child = VisualTreeHelper.GetChild(root, i); yield return child; foreach (var nested in Descendants(child)) yield return nested; } }
+                    var next = Descendants(macPanel).OfType<Button>().Single(b => b.Content?.ToString() == "下一步：审核并执行 →");
+                    var position = next.TranslatePoint(new Point(0, 0), macPanel);
+                    if (position.Y < 0 || position.Y + next.ActualHeight > 360 || position.X + next.ActualWidth > 900) throw new InvalidOperationException("MAC 页底下一步按钮超出窄窗口可视范围。");
                 }
                 catch (Exception ex) { failure = ex; }
                 finally { app?.Shutdown(); }

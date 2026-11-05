@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--qa")) Title = "网络运维工作台 · 交互重构独立验收 0.4.1";
+        if (args.Contains("--qa")) Title = "网络运维工作台 · MAC 绑定独立验收 0.5.0";
         var index = Array.IndexOf(args, "--workspace");
         var root = index >= 0 && args.Length > index + 1 ? Path.GetFullPath(args[index + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetOpsStudio", "data");
         workspaceRoot = root;
@@ -72,8 +72,6 @@ public partial class MainWindow : Window
     private void MonitorSettingsClick(object sender, RoutedEventArgs e)
     { if (viewModel.SelectedDevice is not null) new MonitorWindow(viewModel) { Owner = this }.ShowDialog(); }
     private void ManualLinkClick(object sender, RoutedEventArgs e) => new ManualLinkWindow(viewModel) { Owner = this }.ShowDialog();
-    private void StageMacClick(object sender, RoutedEventArgs e)
-    { MacDraftGrid.CommitEdit(DataGridEditingUnit.Cell, true); MacDraftGrid.CommitEdit(DataGridEditingUnit.Row, true); viewModel.StageMac.Execute(null); }
     private void AddDeviceClick(object sender, RoutedEventArgs e) => new AddDeviceWindow(viewModel) { Owner = this }.ShowDialog();
     private void EditDeviceClick(object sender, RoutedEventArgs e)
     {

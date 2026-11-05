@@ -29,7 +29,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         if (request.Pvid == device.ManagementVlan || request.Ports?.Any(n => state.Ports.Any(p => p.Name == n && p.Pvid == device.ManagementVlan)) == true)
             risks.Add("涉及管理 VLAN：真实执行前必须核对管理路径并准备带外恢复。");
         if (request.Enabled == false) risks.Add("将禁用所选端口，其连接的终端可能离线。");
-        if (MacRules.SecurityChanges(request).Length > 0) risks.Add("源 MAC 白名单会临时关闭相关端口后配置，完成后恢复原启停状态；不在白名单内的终端会被限制。最后一条删除后关闭该端口白名单。");
+        risks.AddRange(SecurityRisks(after, [request]));
         if (request.AddMacBindings?.Any(b => b.Kind == MacBindingKind.StaticForwarding) == true) risks.Add("静态转发表指定目的 MAC 的出口，不等同于仅允许该源 MAC 接入的端口安全策略。");
         var plan = new ChangePlan(Guid.NewGuid(), device.Id, Hash(state), request,
             drivers.Resolve(device).Compile(request, state), diffs, risks.ToArray(), DateTimeOffset.UtcNow, device.IsSimulation, IdentityHash(device));
@@ -68,7 +68,28 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
     public static DeviceState ProjectBatch(Device device, DeviceState state, IEnumerable<ChangeRequest> requests)
     { foreach (var request in requests) { Validate(device, state, request); state = Transform(state, request); } return state; }
     public static string[] CompileBatch(IDeviceDriver driver, DeviceState state, IEnumerable<ChangeRequest> requests)
-    { List<string> commands = []; foreach (var request in requests) { commands.AddRange(driver.Compile(request, state)); state = Transform(state, request); } return commands.ToArray(); }
+    {
+        var items = requests.ToArray(); List<string> commands = [];
+        for (var i = 0; i < items.Length; i++)
+        {
+            var request = items[i];
+            if (!SecurityOnly(request)) { commands.AddRange(driver.Compile(request, state)); state = Transform(state, request); continue; }
+            var before = state; HashSet<string> ports = [];
+            do { ports.UnionWith(MacRules.SecurityChanges(items[i])); state = Transform(state, items[i]); i++; }
+            while (i < items.Length && SecurityOnly(items[i]));
+            i--;
+            var old = MacRules.Bindings(before).Where(b => b.Kind == MacBindingKind.SecureSource).ToArray();
+            var next = MacRules.Bindings(state).Where(b => b.Kind == MacBindingKind.SecureSource).ToArray();
+            var merged = new ChangeRequest(AddMacBindings: next.Except(old).ToArray(), RemoveMacBindings: old.Except(next).ToArray(),
+                SecuritySettings: MacRules.Security(state).Where(p => ports.Contains(p.PortName)).Select(p => new PortSecuritySettings(p.PortName, p.Maximum, p.Violation)).ToArray());
+            var remaining = ports.Except(MacRules.SecurityChanges(merged)).Where(name => !before.Ports.Single(p => p.Name == name).Enabled && state.Ports.Single(p => p.Name == name).Enabled).ToArray();
+            if (remaining.Length > 0) merged = merged with { Ports = remaining, Enabled = true };
+            commands.AddRange(driver.Compile(merged, before));
+        }
+        return commands.ToArray();
+    }
+    private static bool SecurityOnly(ChangeRequest r) => MacRules.SecurityChanges(r).Length > 0 && r.CreateVlanId is null && r.RenameVlanId is null && r.DeleteVlanId is null
+        && r.Ports?.Length is not > 0 && !(r.AddMacBindings ?? []).Concat(r.RemoveMacBindings ?? []).Any(b => b.Kind != MacBindingKind.SecureSource);
     public ChangePlan PreviewMany(Device device, IReadOnlyList<ChangeRequest> inputs)
     {
         if (inputs.Count is < 1 or > 100) throw new ArgumentException("每次审核 1–100 组变更。");
@@ -79,7 +100,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         if (differences.Length == 0) throw new ArgumentException("待提交内容没有造成最终差异。");
         List<string> risks = [device.IsSimulation ? "当前为本地模拟批量变更，不访问真实设备。" : "真实设备批量变更：先重新读取基线和备份，顺序执行；失败可能部分生效。"];
         if (requests.Any(r => r.Ports?.Any(n => before.Ports.Any(p => p.Name == n && (p.IsUplink || p.Pvid == device.ManagementVlan))) == true)) risks.Add("包含上联或管理端口，可能影响管理路径与下游网络。");
-        if (requests.Any(r => MacRules.SecurityChanges(r).Length > 0)) risks.Add("源 MAC 白名单会临时关闭相关接口，完成后恢复原启停状态；未知终端可能被限制。");
+        risks.AddRange(SecurityRisks(target, requests));
         if (requests.Any(r => r.Enabled == false)) risks.Add("包含禁用端口操作，连接终端将中断。");
         var plan = new ChangePlan(Guid.NewGuid(), device.Id, Hash(before), requests[0], CompileBatch(drivers.Resolve(device), before, requests), differences, risks.ToArray(), DateTimeOffset.UtcNow, device.IsSimulation, IdentityHash(device), requests);
         pending.Clear(); pending[plan.Id] = plan; return Clone(plan);
@@ -141,7 +162,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
             if (request.Description is not null && (Encoding.UTF8.GetByteCount(request.Description) > 128 || !SafeDescription().IsMatch(request.Description) || request.Description.IndexOfAny([';', '|']) >= 0))
                 throw new ArgumentException("端口描述支持中文和常用标点，最多 128 个 UTF-8 字节；不能包含换行、控制字符、分号或竖线。留空表示清除。");
         }
-        else if ((request.CreateVlanId is null && request.RenameVlanId is null && request.DeleteVlanId is null && request.AddMacBindings?.Length is not > 0 && request.RemoveMacBindings?.Length is not > 0) || request.Mode is not null || request.Pvid is not null || request.Enabled is not null || request.Description is not null || request.TaggedVlans is not null)
+        else if ((request.CreateVlanId is null && request.RenameVlanId is null && request.DeleteVlanId is null && request.AddMacBindings?.Length is not > 0 && request.RemoveMacBindings?.Length is not > 0 && request.SecuritySettings?.Length is not > 0) || request.Mode is not null || request.Pvid is not null || request.Enabled is not null || request.Description is not null || request.TaggedVlans is not null)
             throw new ArgumentException("请选择至少一个端口或填写新建 VLAN。");
         MacRules.Validate(device, state, request);
     }
@@ -156,6 +177,8 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         if (request.DeleteVlanId is int remove) vlans = vlans.Where(v => v.Id != remove).ToArray();
         var ports = state.Ports.Select(p => request.Ports?.Contains(p.Name) == true ? p with
         { Mode = request.Mode ?? p.Mode, Pvid = request.Pvid ?? p.Pvid, TaggedVlans = request.Mode == PortMode.Access ? [] : request.TaggedVlans?.Distinct().Order().ToArray() ?? p.TaggedVlans, Enabled = request.Enabled ?? p.Enabled, Description = request.Description ?? p.Description } : p).ToArray();
+        var securityPorts = MacRules.SecurityChanges(request);
+        ports = ports.Select(p => securityPorts.Contains(p.Name) ? p with { Enabled = true } : p).ToArray();
         return state with { Revision = state.Revision + 1, Ports = ports, Vlans = vlans };
     }
     private static PlanDiff[] Differences(DeviceState before, DeviceState after)
@@ -166,7 +189,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         foreach (var name in MacRules.Security(before).Select(s => s.PortName).Union(MacRules.Security(after).Select(s => s.PortName)))
         {
             var old = MacRules.Security(before).SingleOrDefault(s => s.PortName == name); var next = MacRules.Security(after).SingleOrDefault(s => s.PortName == name);
-            if (old != next) diffs.Add(new($"端口安全 {name}", old is null ? "未启用" : $"上限 {old.Maximum} / {old.Violation}", next is null ? "关闭白名单" : $"白名单 {next.Maximum} / restrict"));
+            if (old != next) diffs.Add(new($"端口安全 {name}", old is null ? "未启用" : $"上限 {old.Maximum} / {ViolationDescription(old.Violation)}", next is null ? "关闭端口安全" : $"上限 {next.Maximum} / {ViolationDescription(next.Violation)}"));
         }
         foreach (var vlan in after.Vlans.Where(v => !before.Vlans.Any(b => b.Id == v.Id))) diffs.Add(new($"VLAN {vlan.Id}", "不存在", vlan.Name));
         foreach (var vlan in before.Vlans.Where(v => !after.Vlans.Any(a => a.Id == v.Id))) diffs.Add(new($"VLAN {vlan.Id}", vlan.Name, "删除"));
@@ -179,6 +202,19 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         return diffs.ToArray();
     }
     private static string Describe(PortState p) => $"{p.ModeLabel} · PVID {p.Pvid} · {(p.Enabled ? "启用" : "禁用")} · 允许 [{p.TaggedLabel}] · {p.Description}";
+    public static string ViolationDescription(string action) => action switch { "shutdown" => "shutdown（违规后关闭端口）", "restrict" => "restrict（丢弃违规报文并告警）", "protect" => "protect（仅丢弃违规报文）", _ => action };
+    private static IEnumerable<string> SecurityRisks(DeviceState target, IEnumerable<ChangeRequest> requests)
+    {
+        var ports = requests.SelectMany(MacRules.SecurityChanges).Distinct().ToArray();
+        if (ports.Length == 0) yield break;
+        yield return "端口安全绑定会先 shutdown（关闭端口），删除旧 MAC 并绑定新 MAC，最后 no shutdown（启用端口，即使原先已禁用）；回读验证通过后自动写入启动配置。最后一条绑定删除后关闭端口安全。";
+        foreach (var p in MacRules.Security(target).Where(p => ports.Contains(p.PortName)))
+        {
+            if (p.Violation == "shutdown") yield return $"{p.PortName} 违规动作为 shutdown：违规会使整个端口进入错误禁用状态，需要恢复后才能通信。";
+            var count = MacRules.Bindings(target).Count(b => b.Kind == MacBindingKind.SecureSource && b.PortName == p.PortName);
+            if (p.Maximum > count) yield return $"{p.PortName} 上限 {p.Maximum} 大于静态绑定数 {count}，剩余名额可动态学习其他 MAC；这不是严格的源 MAC 白名单。";
+        }
+    }
     [GeneratedRegex(@"^[A-Za-z0-9_-]{1,32}$")] private static partial Regex SafeName();
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9/:.-]{0,63}$")] private static partial Regex SafePort();
     [GeneratedRegex(@"\A[\p{L}\p{M}\p{N}\p{P}\p{S} ]*\z")] private static partial Regex SafeDescription();

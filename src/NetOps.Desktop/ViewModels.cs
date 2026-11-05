@@ -45,9 +45,12 @@ public sealed class MembershipRow(PortState port)
 public sealed record PortDraft(string[] Selected, bool ModeOn, PortMode Mode, bool PvidOn, string Pvid,
     bool VlansOn, string Vlans, bool EnabledOn, bool Enabled, bool DescriptionOn, string Description,
     bool CreateVlan, string NewVlanName);
-public sealed class MacItem(MacBinding binding) : Observable
+public sealed class MacItem(MacBinding binding, PortSecurityState? security = null) : Observable
 {
     public MacBinding Binding { get; } = binding;
+    public PortSecurityState? Security { get; } = security;
+    public string MaximumLabel => Binding.Kind == MacBindingKind.SecureSource ? Security?.Maximum.ToString() ?? "未读取" : "—";
+    public string ViolationLabel => Binding.Kind == MacBindingKind.SecureSource && Security is not null ? ChangeEngine.ViolationDescription(Security.Violation) : "—";
     private bool picked;
     public bool Picked { get => picked; set => Set(ref picked, value); }
 }
@@ -99,7 +102,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         CompareSnapshot = new(_ => Guard(Compare), () => SelectedSnapshot is not null && SelectedDevice?.IsSimulation == true);
         NewVlan = new(_ => { SelectedVlan = null; VlanAction = VlanActions[0]; VlanId = Enumerable.Range(2, 4093).First(i => !AvailableVlans.Any(v => v.Id == i)).ToString(); VlanName = ""; });
         PreviewMac = new(_ => Guard(() => ShowPlan(BuildMacRequest())), () => CanConfigure && Ready && MacValidation.Length == 0);
-        DeleteMac = new(_ => Guard(() => ShowPlan(new(RemoveMacBindings: MacBindings.Where(b => b.Picked).Select(b => b.Binding).ToArray()))), () => CanConfigure && Ready && MacBindings.Any(b => b.Picked));
+        DeleteMac = new(_ => Guard(() => ShowPlan(BuildDeleteMacRequest())), () => CanConfigure && Ready && MacBindings.Any(b => b.Picked));
         MacTemplate = new(_ => MacBatch = string.Join("\n", Ports.Where(p => p.Picked).Select(p => $",{p.State.Pvid},{p.State.Name}")), () => CanConfigure && Ports.Any(p => p.Picked));
         SelectPortGroup = new(group => { if (group is PortPanelGroup g) { loading = true; foreach (var port in g.Items) port.Picked = true; loading = false; SelectionChanged(); } }, () => CanConfigure);
         commands = [ReadCurrent, Backup, PreviewPorts, PreviewVlan, ApplyPlan, CloseReview, TogglePort, SelectAllPorts, ClearSelection, SelectRange, EditPorts, ToggleAi, AskAi, Cancel, ConnectTerminal, DisconnectTerminal, SendTerminal, CompareSnapshot, NewVlan, PreviewMac, DeleteMac, MacTemplate, SelectPortGroup];
@@ -120,14 +123,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ActionCommand DeleteMac { get; }
     public ActionCommand MacTemplate { get; }
     public ActionCommand SelectPortGroup { get; }
-    public Choice<MacBindingKind>[] MacKinds { get; } = [new(MacBindingKind.StaticForwarding, "静态转发绑定"), new(MacBindingKind.SecureSource, "源 MAC 白名单（Cisco 接入口）")];
+    public Choice<MacBindingKind>[] MacKinds { get; } = [new(MacBindingKind.StaticForwarding, "静态转发绑定"), new(MacBindingKind.SecureSource, "端口安全绑定（Cisco 接入口）")];
     private Choice<MacBindingKind>? selectedMacKind;
-    public Choice<MacBindingKind> SelectedMacKind { get => selectedMacKind ?? MacKinds[0]; set { Set(ref selectedMacKind, value); InvalidatePlan(); Changed(nameof(MacValidation)); RefreshCommands(); } }
+    public Choice<MacBindingKind> SelectedMacKind { get => selectedMacKind ?? MacKinds[SelectedDevice?.Vendor == Vendor.Cisco ? 1 : 0]; set { if (Set(ref selectedMacKind, value)) { Changed(nameof(IsSecureMac)); MacEditorChanged(); } } }
     private readonly Dictionary<Guid, string> macDrafts = [];
     private string macBatch = "";
     public string MacBatch { get => macBatch; set { Set(ref macBatch, value); if (SelectedDevice is not null) macDrafts[SelectedDevice.Id] = value; InvalidatePlan(); Changed(nameof(MacValidation)); RefreshCommands(); } }
     public string MacValidation { get { if (!CanConfigure) return CapabilityHint; try { ChangeEngine.ValidateRequest(RequireDevice(), ProjectedState() ?? workspace.GetState(RequireDevice().Id)!, BuildMacRequest()); return ""; } catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return ex.Message; } } }
-    public ChangeRequest BuildMacRequest() => new(AddMacBindings: MacRows.Count > 0 ? MacRows.Select(r => MacRules.Canonical(new(r.Address.Trim(), ParseInt(r.Vlan, "VLAN"), r.PortName, SelectedMacKind.Value))).ToArray() : MacRules.ParseBatch(MacBatch, SelectedMacKind.Value));
     public Choice<PortMode>[] Modes { get; } = [new(PortMode.Access, "接入 Access"), new(PortMode.Trunk, "干道 Trunk")];
     public Choice<int>[] VlanActions { get; } = [new(0, "创建 VLAN"), new(1, "重命名 VLAN"), new(2, "删除 VLAN")];
     public Choice<AiProtocol>[] Protocols { get; } = [new(AiProtocol.Responses, "OpenAI 响应协议"), new(AiProtocol.ClaudeMessages, "Claude 消息协议"), new(AiProtocol.Gemini, "Gemini 内容生成协议"), new(AiProtocol.ChatCompletions, "对话补全兼容协议"), new(AiProtocol.Ollama, "Ollama 本机协议")];
@@ -188,7 +190,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         set { if (TerminalConnected) { Status = "请先断开终端，再切换连接。"; Changed(); return; } if (Set(ref selectedConnection, value)) { InvalidatePlan(); if (SelectedDevice is not null) prepared.Remove(SelectedDevice.Id); RefreshAll(); } }
     }
     private int section;
-    public int Section { get => section; set { if (Set(ref section, value) && value != 1) EditorOpen = false; } }
+    public int Section { get => section; set { if (Set(ref section, value)) { TaskLanding = false; if (value != 1) EditorOpen = false; NotifyTask(); } } }
     private string search = "";
     public string Search { get => search; set { Set(ref search, value); Changed(nameof(FilteredDevices)); NotifyDeviceFilter(); } }
     public IEnumerable<Device> FilteredDevices => Devices.Where(d => !d.Archived && $"{d.Name} {d.ManagementIp} {d.VendorLabel} {d.Location}".Contains(Search, StringComparison.OrdinalIgnoreCase));
@@ -205,7 +207,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool EditorOpen { get => editorOpen; set { Set(ref editorOpen, value); if (value) AiOpen = false; } }
     private bool aiOpen;
     public bool AiOpen { get => aiOpen; set { Set(ref aiOpen, value); if (value) EditorOpen = false; } }
-    private string status = "就绪 · 可从网络总览、拓扑或设备中心开始。";
+    private string status = "从设备中心选择一台设备，再选择要完成的操作。";
     public string Status { get => status; set => Set(ref status, value); }
     private bool busy;
     public bool Busy { get => busy; private set { Set(ref busy, value); RefreshAll(); } }
@@ -310,6 +312,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private ChangePlan? plan;
     public PlanDiff[] PlanDifferences => plan?.Differences ?? [];
     public string PlanCommands => string.Join(Environment.NewLine, plan?.Commands ?? []);
+    public bool IsSecurityPlan => plan is not null && ChangeEngine.Requests(plan).Any(r => MacRules.SecurityChanges(r).Length > 0);
+    public bool CanChooseSave => !IsSecurityPlan;
+    public CommandExplanation[] PlanCommandRows => (plan?.Commands ?? []).Select(CommandExplanation.From).Concat(
+        plan is not null && (IsSecurityPlan || SaveAfterVerify) ? [new CommandExplanation(NetworkOperations.SaveCommand(RequireDevice().Vendor), "回读验证通过后执行：写入设备启动配置；模拟设备不执行保存命令。")] : []).ToArray();
+    private void NotifyPlan() { foreach (var name in new[] { nameof(PlanDifferences), nameof(PlanCommands), nameof(PlanCommandRows), nameof(PlanRisks), nameof(PlanTitle), nameof(IsLivePlan), nameof(IsSecurityPlan), nameof(CanChooseSave), nameof(SaveAfterVerify), nameof(ReviewScope) }) Changed(name); }
     public string PlanRisks => string.Join("\n", plan?.Risks.Select(r => "• " + r) ?? []);
     public string PlanTitle => plan is null ? "变更审核" : $"{SelectedDevice?.Name} · {plan.Differences.Length} 项变更";
     public bool IsLivePlan => plan?.IsSimulation == false;
@@ -318,15 +325,15 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool planConfirmed, liveRiskAccepted, saveAfterVerify = true;
     public bool PlanConfirmed { get => planConfirmed; set { Set(ref planConfirmed, value); RefreshCommands(); } }
     public bool LiveRiskAccepted { get => liveRiskAccepted; set { Set(ref liveRiskAccepted, value); RefreshCommands(); } }
-    public bool SaveAfterVerify { get => saveAfterVerify; set => Set(ref saveAfterVerify, value); }
+    public bool SaveAfterVerify { get => IsSecurityPlan || saveAfterVerify; set { if (Set(ref saveAfterVerify, value)) { Changed(nameof(SaveAfterVerify)); Changed(nameof(PlanCommandRows)); } } }
     private void ShowPlan(ChangeRequest request)
     {
-        plan = engine.Preview(RequireDevice(), request); PlanConfirmed = false; LiveRiskAccepted = false;
-        Changed(nameof(PlanDifferences)); Changed(nameof(PlanCommands)); Changed(nameof(PlanRisks)); Changed(nameof(PlanTitle)); Changed(nameof(IsLivePlan));
+        plan = engine.Preview(RequireDevice(), request); reviewIncludesCurrent = true; PlanConfirmed = false; LiveRiskAccepted = false;
+        NotifyPlan();
         ReviewOpen = true; Status = "变更尚未下发，请审核差异和风险。"; RefreshCommands();
     }
     private void InvalidatePlan()
-    { engine?.Invalidate(); plan = null; ReviewOpen = false; PlanConfirmed = false; LiveRiskAccepted = false; }
+    { engine?.Invalidate(); plan = null; NotifyPlan(); ReviewOpen = false; PlanConfirmed = false; LiveRiskAccepted = false; }
     private async Task ApplyAsync()
     {
         if (plan is null) throw new InvalidOperationException("计划已失效，请重新预览。");
@@ -344,6 +351,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (selectedPlan.Request.AddMacBindings?.Length > 0) MacBatch = "";
             foreach (var item in PendingChanges.Where(p => p.DeviceId == device.Id).ToArray()) PendingChanges.Remove(item);
             queueBaselines.Remove(device.Id); MacRows.Clear(); NotifyQueue();
+            EditorOpen = false; LastResult = Status;
             SaveDraft(); RefreshCurrent(); InvalidatePlan();
         }
         catch { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } throw; }
@@ -370,7 +378,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             var multiple = state?.Ports.Select(p => p.Name[..Math.Max(0, p.Name.LastIndexOf('/'))]).Distinct().Count() > 1;
             foreach (var p in state?.Ports ?? []) { var item = new PortItem(p, multiple); item.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(PortItem.Picked)) SelectionChanged(); }; Ports.Add(item); }
             foreach (var v in state?.Vlans ?? []) Vlans.Add(v);
-            foreach (var b in state?.MacBindings ?? []) { var item = new MacItem(b); item.PropertyChanged += (_, _) => { InvalidatePlan(); RefreshCommands(); }; MacBindings.Add(item); }
+            foreach (var b in state?.MacBindings ?? []) { var item = new MacItem(b, state?.PortSecurity?.SingleOrDefault(s => s.PortName == b.PortName)); item.PropertyChanged += (_, _) => { InvalidatePlan(); RefreshCommands(); RefreshWorkbenchCommands(); }; MacBindings.Add(item); }
         }
         loading = false; RestoreDraft(); RefreshHistory(); Changed(nameof(MembershipRows)); RefreshAll();
     }
@@ -537,7 +545,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         finally { operationCancellation.Dispose(); operationCancellation = null; Busy = false; Operation = ""; RefreshAll(); }
     }
     private static string Error(Exception ex) => ex is ArgumentException or InvalidOperationException or NotSupportedException ? ex.Message : "操作未完成，请检查连接、认证、权限或设备兼容性。敏感原文未写入日志。";
-    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); }
+    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); RefreshGuidedCommands(); }
     private void RefreshAll()
     { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(ReadCurrentLabel), nameof(NextStepHint), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans) }) Changed(name); RefreshCommands(); }
     public void Dispose() { operationCancellation?.Cancel(); terminalCancellation?.Cancel(); if (terminal is not null) _ = terminal.DisposeAsync(); }
