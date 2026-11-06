@@ -83,6 +83,7 @@ public sealed partial class MainViewModel
     }
     private ActionCommand[] workbenchCommands = [];
     public ActionCommand Navigate { get; private set; } = null!;
+    public ActionCommand OpenAiSettings { get; private set; } = null!;
     public ActionCommand OpenDevice { get; private set; } = null!;
     public ActionCommand BackToDevices { get; private set; } = null!;
     public ActionCommand ClearDeviceFilter { get; private set; } = null!;
@@ -108,6 +109,7 @@ public sealed partial class MainViewModel
     private void InitializeWorkbench()
     {
         Navigate = new(p => { var target = int.Parse(p?.ToString() ?? "0"); if (target == 2) ReturnToDevices(); else Page = target; }, () => !IsApplying && !ReviewOpen);
+        OpenAiSettings = new(_ => { AiOpen = false; Page = 5; SettingsSection = 1; }, () => !IsApplying && !ReviewOpen);
         BackToDevices = new(_ => ReturnToDevices(), () => IsDeviceWorkspace && !ReviewOpen);
         ClearDeviceFilter = new(_ => { Search = ""; DeviceGroup = "全部分组"; });
         OpenDeviceQueue = new(_ => { SelectedPending = PendingChanges.FirstOrDefault(p => p.DeviceId == SelectedDevice?.Id); Page = 4; }, () => DevicePendingCount > 0 && !ReviewOpen && !IsApplying);
@@ -134,13 +136,16 @@ public sealed partial class MainViewModel
         RefreshObservability();
         InitializeGuidedWorkflow();
         InitializeEasyWorkflow();
+        InitializePortWorkspace();
     }
     private void AddRow(string port, string vlan, MacBinding? original = null)
     { var row = new MacDraftRow { PortName = port, Vlan = vlan, OriginalBinding = original }; row.PropertyChanged += (_, _) => MacEditorChanged(); MacRows.Add(row); }
     private int page = 2;
     public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); Changed(nameof(HelpTitle)); Changed(nameof(HelpText)); RefreshWorkbenchCommands(); } } }
+    private int settingsSection;
+    public int SettingsSection { get => settingsSection; set => Set(ref settingsSection, value); }
     public string PageTitle => Page switch { 1 => "网络拓扑", 2 => DeviceFocused ? SelectedDevice?.Name ?? "设备工作区" : "设备中心", 3 => "告警与事件", 4 => "批量草稿", 5 => "系统设置", _ => "网络总览" };
-    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "选择设备 → 选择操作 → 填写配置 → 审核执行", 3 => "持续异常、恢复时间和处理记录", 4 => "可选功能：把同一设备的多项配置一起审核和执行", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
+    public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "选交换机 → 点端口 → 修改 → 确认应用", 3 => "持续异常、恢复时间和处理记录", 4 => "可选功能：把同一设备的多项配置一起审核和执行", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
     private bool deviceFocused;
     public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); Changed(nameof(HelpTitle)); Changed(nameof(HelpText)); RefreshWorkbenchCommands(); } }
     public bool IsDeviceWorkspace => Page == 2 && DeviceFocused;
@@ -155,7 +160,7 @@ public sealed partial class MainViewModel
     public int DevicePendingCount => PendingChanges.Count(p => p.DeviceId == SelectedDevice?.Id);
     public string DeviceQueueLabel => $"审核本机变更（{DevicePendingCount} 组） →";
     public string ReadCurrentLabel => CanConfigure ? "重新读取配置" : "读取设备配置";
-    public string NextStepHint => Busy ? Operation : !SupportsConfiguration ? CapabilityHint : !CanConfigure ? "先选择要做的事；修改配置前点击“读取设备配置”。" : TaskLanding ? "配置已读取，请在下方选择要完成的操作。" : "填写完成后，点击当前页“下一步：审核并执行”。";
+    public string NextStepHint => Busy ? Operation : !SupportsConfiguration ? CapabilityHint : !CanConfigure ? "先连接并读取，再从左侧端口列表选择插口。" : TaskLanding ? "点击左侧端口，在右侧直接修改。" : "本页填写后检查改动，确认前不会下发。";
     public bool HasMemberHealth => MemberHealthRows.Length > 0;
     public string QueueValidation
     {

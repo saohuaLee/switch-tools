@@ -130,6 +130,82 @@ public static class BeginnerChecks
             var d = Create(); using var vm = Vm(d); var before = ChangeEngine.ConfigurationHash(db.GetState(d.Id)!); vm.StartEasy.Execute("Backup"); vm.EasyNext.Execute(null); await Finish(vm);
             Check(vm.EasyResultVisible && vm.EasyResult.Contains("备份") && db.GetSnapshots(d.Id).Count == 1 && ChangeEngine.ConfigurationHash(db.GetState(d.Id)!) == before);
         });
+        Device TwoMacs()
+        {
+            var d = Create(true); var s = db.GetState(d.Id)!;
+            db.SaveState(s with { MacBindings = [.. s.MacBindings!, new("02:11:22:33:44:66", 10, P1, MacBindingKind.SecureSource)] }); return d;
+        }
+        test("截图问题回归：保留两条再输入一条，三条来源可见，手动上限一有可操作解释", () =>
+        {
+            using var vm = Vm(TwoMacs()); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); vm.WorkTab = 1; vm.WorkAddresses = "38.ff.59.06.1a.77";
+            Check(vm.WorkExistingMacs.Count == 2 && vm.WorkExistingMacs.All(m => m.Keep));
+            Check(vm.WorkMacSummary.Contains("保留 2") && vm.WorkMacSummary.Contains("新增 1") && vm.WorkMacSummary.Contains("共 3"));
+            vm.WorkAutomaticMaximum = false; vm.WorkMaximum = "1"; vm.ReviewWorkPort.Execute(null);
+            Check(!vm.ReviewOpen && vm.WorkError.Contains("保留 2") && vm.WorkError.Contains("新增 1") && vm.WorkError.Contains("自动设置"));
+            vm.AutomaticWorkMaximum.Execute(null); vm.ReviewWorkPort.Execute(null);
+            Check(vm.WorkReviewVisible && !vm.ShowLegacyReview && vm.PlanCommands.Contains("switchport port-security maximum 3"));
+            Check(vm.WorkReviewRows[0].Before.Split('\n').Length == 2 && vm.WorkReviewRows[0].After.Split('\n').Length == 3);
+            vm.CloseReview.Execute(null); Check(!vm.WorkReviewVisible && vm.WorkAddresses.Contains("77"));
+        });
+        await asyncTest("明确只用一个新地址，确认移除两条旧绑定，应用后真正只剩一条", async () =>
+        {
+            var d = TwoMacs(); using var vm = Vm(d); vm.VlanId = "70"; vm.VlanName = "Pending70"; vm.StageVlan.Execute(null);
+            vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); vm.WorkTab = 1; vm.WorkAddresses = "38-ff-59-06-1a-77"; vm.ReplaceAllWorkMacs.Execute(null);
+            Check(vm.WorkMacSummary.Contains("移除 2") && vm.WorkMacSummary.Contains("共 1"), "填写后计数不正确");
+            var r = vm.BuildPortFormRequests().Single(); Check(r.RemoveMacBindings!.Length == 2 && r.AddMacBindings!.Length == 1 && r.SecuritySettings!.Single().Maximum == 1, "生成请求不正确");
+            vm.ReviewWorkPort.Execute(null); Check(vm.WorkReviewSummary.Contains("移除 2") && vm.WorkReviewRows[0].After == "38ff.5906.1a77", "审核未显示完整的一条目标地址");
+            vm.PlanConfirmed = true; vm.ApplyPlan.Execute(null); await Finish(vm);
+            Check(db.GetState(d.Id)!.MacBindings!.Single().Address == "38:ff:59:06:1a:77" && db.GetState(d.Id)!.PortSecurity!.Single().Maximum == 1, "执行后的实际名单和上限不一致");
+            Check(vm.WorkTab == 1 && vm.WorkExistingMacs.Count == 1 && vm.WorkAddresses == "" && vm.WorkHasNotice && !vm.WorkReviewVisible, $"回读显示不一致：页 {vm.WorkTab}，原地址 {vm.WorkExistingMacs.Count}，新输入 {vm.WorkAddresses}，结果提示 {vm.WorkHasNotice}，仍在审核 {vm.WorkReviewVisible}");
+            Check(vm.PendingChanges.Count == 1 && !db.GetState(d.Id)!.Vlans.Any(v => v.Id == 70), "普通操作夹带或清除了其他草稿");
+        });
+        test("完整名单合并重复输入，不把已有地址重复算作新增", () =>
+        {
+            var d = TwoMacs(); var state = db.GetState(d.Id)!; var list = PortMacList.Prepare(state, P1, state.MacBindings!.Select(b => b.Address), "02-11-22-33-44-55\n0211.2233.4455");
+            Check(list.InputCount == 2 && list.Target.Length == 2 && list.Added.Length == 0 && list.Removed.Length == 0 && list.Kept.Length == 2);
+            Reject(() => PortMacList.Prepare(state, P1, ["02:11:22:33:44:77"], ""));
+            Reject(() => PortMacList.Prepare(state, P1, [], "38ff.5906\nshutdown"));
+        });
+        test("切换端口保留各自未应用填写，输入不改变旧名单或其他端口", () =>
+        {
+            var d = TwoMacs(); using var vm = Vm(d); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); vm.WorkName = "未应用名称"; vm.WorkTab = 1; vm.WorkAddresses = "38ff59061a77"; vm.WorkExistingMacs[0].Keep = false;
+            vm.WorkPort = vm.Ports.Single(p => p.State.Name == P2); Check(vm.WorkName == "Keep" && vm.WorkExistingMacs.Count == 0 && vm.WorkAddresses == "");
+            vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); Check(vm.WorkName == "未应用名称" && vm.WorkTab == 1 && vm.WorkAddresses.Contains("77") && !vm.WorkExistingMacs[0].Keep && vm.WorkExistingMacs[1].Keep);
+            Check(db.GetState(d.Id)!.MacBindings!.Length == 2 && db.GetState(d.Id)!.Ports[0].Description == "Old");
+            vm.ResetWorkPort.Execute(null); Check(vm.WorkName == "Old" && vm.WorkExistingMacs.All(m => m.Keep) && vm.WorkAddresses == "");
+            vm.WorkExistingMacs[0].Keep = false; vm.WorkAddresses = vm.WorkExistingMacs[0].Address;
+            vm.WorkPort = vm.Ports.Single(p => p.State.Name == P2); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1);
+            Check(vm.WorkExistingMacs[0].Reentered && vm.WorkExistingMacs[0].Disposition.Contains("仍保留"), "切回端口后重复填写的旧地址不能误标为移除");
+        });
+        await asyncTest("同页修改端口名称网络开关，保留安全绑定及未编辑字段", async () =>
+        {
+            var d = TwoMacs(); using var vm = Vm(d); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); vm.WorkName = "会议室插口"; vm.WorkNetwork = vm.EasyNetworks.Single(n => n.Value == 20); vm.WorkEnabled = false;
+            var requests = vm.BuildPortFormRequests(); Check(requests.Length == 2 && requests[0].MigratePortSecurity && requests[1].Mode is null);
+            vm.ReviewWorkPort.Execute(null); Check(vm.WorkReviewVisible && vm.WorkReviewRows.Length == 3); vm.PlanConfirmed = true; vm.ApplyPlan.Execute(null); await Finish(vm);
+            var after = db.GetState(d.Id)!; Check(after.Ports[0].Description == "会议室插口" && after.Ports[0].Pvid == 20 && !after.Ports[0].Enabled && after.Ports[0].Mode == PortMode.Access);
+            Check(after.MacBindings!.Length == 2 && after.MacBindings.All(b => b.VlanId == 20) && after.PortSecurity!.Single().Maximum == 2);
+        });
+        test("仅浏览或仅改端口说明不会调整 MAC 数量上限，也不会应用另一页填写", () =>
+        {
+            var d = TwoMacs(); var state = db.GetState(d.Id)!; db.SaveState(state with { PortSecurity = [state.PortSecurity![0] with { Maximum = 5 }] });
+            using var vm = Vm(d); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); Reject(() => vm.BuildPortFormRequests());
+            vm.WorkTab = 1; Reject(() => vm.BuildPortFormRequests()); vm.WorkAddresses = "38ff59061a77"; vm.WorkTab = 0; vm.WorkName = "仅改名";
+            var r = vm.BuildPortFormRequests().Single(); Check(r.Description == "仅改名" && r.SecuritySettings is null && r.AddMacBindings is null);
+            vm.ReviewWorkPort.Execute(null); Check(vm.WorkReviewRows.Length == 1 && !vm.PlanCommands.Contains("port-security"));
+        });
+        test("新名单可以明确清空，也可以恢复全部原地址，取消审核使旧计划失效", () =>
+        {
+            var d = TwoMacs(); using var vm = Vm(d); vm.WorkPort = vm.Ports.Single(p => p.State.Name == P1); vm.WorkTab = 1; vm.ReplaceAllWorkMacs.Execute(null);
+            var request = vm.BuildPortFormRequests().Single(); Check(request.RemoveMacBindings!.Length == 2 && request.SecuritySettings is null && vm.WorkLimitSummary.Contains("解除"));
+            vm.ReviewWorkPort.Execute(null); Check(vm.WorkReviewRows[0].After.Contains("解除")); vm.CloseReview.Execute(null); vm.PlanConfirmed = true;
+            Check(!vm.ApplyPlan.CanExecute(null)); vm.KeepAllWorkMacs.Execute(null); Check(vm.WorkExistingMacs.All(m => m.Keep)); Reject(() => vm.BuildPortFormRequests());
+        });
+        test("网络页面直接创建改名删除，不依赖旧任务向导或批量草稿", () =>
+        {
+            using var vm = Vm(Create()); vm.ChooseTask.Execute("2"); vm.CreateWorkNetwork.Execute(null); vm.NetworkNumber = "60"; vm.ReviewWorkNetwork.Execute(null); Check(vm.WorkReviewVisible && vm.WorkReviewSummary.Contains("60")); vm.CloseReview.Execute(null);
+            vm.WorkVlan = vm.Vlans.Single(v => v.Id == 20); vm.RenameWorkNetwork.Execute(null); vm.NetworkName = "Visitors"; vm.ReviewWorkNetwork.Execute(null); Check(vm.WorkReviewVisible && vm.WorkReviewRows.Single().After == "Visitors"); vm.CloseReview.Execute(null);
+            vm.WorkVlan = vm.Vlans.Single(v => v.Id == 10); vm.DeleteWorkNetwork.Execute(null); vm.ReviewWorkNetwork.Execute(null); Check(!vm.ReviewOpen && vm.NetworkError.Length > 0);
+        });
     }
     private sealed class NoAi : IAiClient { public Task<string> AnalyzeAsync(AiProfile p, string q, string c, CancellationToken ct) => throw new NotSupportedException(); }
     private sealed class NoSessions : ISessionFactory { public IDeviceSession Create(ConnectionProtocol protocol) => throw new InvalidOperationException("本组检查不允许建立真实设备会话。"); }

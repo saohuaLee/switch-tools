@@ -34,18 +34,11 @@ public partial class AddDeviceWindow : Window
         LoadProfile(current); loading = false;
     }
     private void SimulationChanged(object sender, RoutedEventArgs e)
-    { if (NextStepButton is not null) NextStepButton.Content = SimulationBox.IsChecked == true ? "创建练习设备 →" : "下一步：填写连接账户 →"; }
-    private void PreviousStepClick(object sender, RoutedEventArgs e) => ShowStep(0);
-    private void NextStepClick(object sender, RoutedEventArgs e)
     {
-        ErrorText.Text = "";
-        if (string.IsNullOrWhiteSpace(DeviceName.Text)) { ErrorText.Text = "先给设备起一个方便识别的名字。"; DeviceName.Focus(); return; }
-        if (VendorBox.SelectedItem is null) { ErrorText.Text = "请选择设备上的厂商品牌。"; VendorBox.Focus(); return; }
-        if (SimulationBox.IsChecked == true) { SaveClick(sender, e); return; }
-        ShowStep(1);
+        if (SaveDeviceButton is null) return;
+        SaveDeviceButton.Content = SimulationBox.IsChecked == true ? "创建练习设备" : "保存，进入端口设置";
+        ShowProtocol();
     }
-    private void ShowStep(int step)
-    { SetupPages.SelectedIndex = step; SetupProgress.Text = step == 0 ? "第 1 步 / 2：这台交换机是谁？" : "第 2 步 / 2：怎样连接这台交换机？"; PreviousStepButton.Visibility = SaveDeviceButton.Visibility = step == 1 ? Visibility.Visible : Visibility.Collapsed; NextStepButton.Visibility = step == 0 ? Visibility.Visible : Visibility.Collapsed; }
     private void LoadProfile(ConnectionProfile profile)
     {
         loading = true; current = profile; privateKey = ""; ConnectionName.Text = profile.Name; ProtocolBox.SelectedIndex = (int)profile.Protocol; NetworkPortBox.Text = profile.Port.ToString(); FingerprintBox.Text = profile.HostFingerprint ?? "";
@@ -63,11 +56,11 @@ public partial class AddDeviceWindow : Window
     }
     private void ShowProtocol()
     {
-        if (ProtocolBox.SelectedItem is not Choice<ConnectionProtocol> choice) return;
+        if (ProtocolBox is null || ProtocolBox.SelectedItem is not Choice<ConnectionProtocol> choice) return;
         SerialOptions.Visibility = choice.Value == ConnectionProtocol.Console ? Visibility.Visible : Visibility.Collapsed;
         ApiOptions.Visibility = choice.Value is ConnectionProtocol.Restconf or ConnectionProtocol.HttpApi ? Visibility.Visible : Visibility.Collapsed;
         FingerprintOptions.Visibility = choice.Value is ConnectionProtocol.Ssh or ConnectionProtocol.Netconf ? Visibility.Visible : Visibility.Collapsed;
-        CredentialsOptions.Visibility = choice.Value is ConnectionProtocol.Console or ConnectionProtocol.Telnet ? Visibility.Collapsed : Visibility.Visible;
+        CredentialsOptions.Visibility = SimulationBox.IsChecked == true || choice.Value is ConnectionProtocol.Console or ConnectionProtocol.Telnet ? Visibility.Collapsed : Visibility.Visible;
         AllowTelnetBox.Visibility = choice.Value == ConnectionProtocol.Telnet ? Visibility.Visible : Visibility.Collapsed;
         NetworkPortBox.IsEnabled = choice.Value != ConnectionProtocol.Console;
     }
@@ -86,7 +79,7 @@ public partial class AddDeviceWindow : Window
             if (SimulationBox.IsChecked == true && string.IsNullOrWhiteSpace(DeviceIp.Text)) DeviceIp.Text = Enumerable.Range(100, 155).Select(n => $"192.0.2.{n}").First(ip => !viewModel.Devices.Any(d => d.ManagementIp == ip));
             if (!int.TryParse(ManagementVlanBox.Text, out var vlan) || !int.TryParse(NetworkPortBox.Text, out var port) || !int.TryParse(BaudBox.Text, out var baud) || !int.TryParse(DataBitsBox.Text, out var bits)) throw new ArgumentException("管理 VLAN、网络端口和串口参数必须为整数。");
             var profile = current with { Name = ConnectionName.Text.Trim(), Protocol = ((Choice<ConnectionProtocol>)ProtocolBox.SelectedItem).Value, Port = port, HostFingerprint = FingerprintBox.Text.Trim(), SerialPort = SerialPortBox.Text.Trim(), BaudRate = baud, DataBits = bits, Parity = ParityBox.SelectedItem?.ToString() ?? "None", StopBits = StopBitsBox.SelectedItem?.ToString() ?? "One", FlowControl = FlowBox.SelectedItem?.ToString() ?? "None", Endpoint = EndpointBox.Text.Trim(), AllowTelnet = AllowTelnetBox.IsChecked == true };
-            if (profile.Protocol != ConnectionProtocol.Console && !IPAddress.TryParse(DeviceIp.Text.Trim(), out _)) { ShowStep(0); DeviceIp.Focus(); throw new ArgumentException("设备管理地址没有填正确，请填写交换机的 IP 地址。"); }
+            if (profile.Protocol != ConnectionProtocol.Console && !IPAddress.TryParse(DeviceIp.Text.Trim(), out _)) { DeviceIp.Focus(); throw new ArgumentException("设备管理地址没有填正确，请填写交换机的 IP 地址。"); }
             if (SimulationBox.IsChecked != true && profile.Protocol is ConnectionProtocol.Ssh or ConnectionProtocol.Netconf)
             {
                 if (string.IsNullOrWhiteSpace(UsernameBox.Text)) throw new ArgumentException("请填写交换机的登录用户名。");

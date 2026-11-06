@@ -17,11 +17,11 @@ public sealed partial class MainViewModel
     private Choice<MacBinding>? easyOldMac;
     private Choice<string>? easyViolation;
     public bool EasyActive { get => easyActive; private set { Set(ref easyActive, value); Changed(nameof(ShowLegacyReview)); NotifyTask(); NotifyEasy(); } }
-    public bool ShowLegacyReview => ReviewOpen && !EasyActive;
+    public bool ShowLegacyReview => ReviewOpen && !EasyActive && !workReview;
     public bool CanOpenAdvancedTools => Ready && !ReviewOpen;
     public bool LegacyTaskContentVisible => TaskContentVisible && !EasyActive;
     public bool LegacyTaskReadVisible => NeedsTaskRead && !EasyActive;
-    public bool LegacyTaskHeadingVisible => TaskFormVisible && !EasyActive;
+    public bool LegacyTaskHeadingVisible => TaskFormVisible && !EasyActive && Section is 1 or 4 or 6 or 7;
     public int EasyStep { get => easyStep; private set { Set(ref easyStep, value); NotifyEasy(); } }
     public bool EasyConnectVisible => EasyStep == 0;
     public bool EasySelectVisible => EasyStep == 1;
@@ -146,7 +146,7 @@ public sealed partial class MainViewModel
         3 => "先查看异常发生在哪台设备以及最近采集时间，再进入设备核对。确认提醒只代表已经看到，不会自动修复故障；设备恢复需等待新的采集结果。\n\n",
         _ => ""
     };
-    public string HelpText => EasyActive ? $"{EasyHint}\n\n端口就是交换机上插网线的插口。\n\n端口名称：给插口写一个方便识别的说明，不改变联网方式。\n\n网络（VLAN）：把设备分到不同网络，编号应由网络管理员提供；更改后可能需要重新获取 IP。\n\n设备地址（MAC）：网卡的地址，用于限制这个插口允许哪些设备接入。\n\n连接信息和密码在“设备与连接设置”中填写。" : PageHelp + "1. 先添加一台交换机，填写它的管理地址与连接账户。\n\n2. 选择设备，再选择具体要做的事。每次只改一类设置。\n\n3. 按页面底部的下一步完成；看到确认页时仍未修改设备。\n\n4. 确认后软件先备份，再执行和检查结果。\n\n带“练习”标记的设备只改本机模拟数据，可以放心熟悉操作。\n\n命令终端、完整端口设置、AI 和批量草稿在高级功能中。";
+    public string HelpText => EasyActive ? $"{EasyHint}\n\n端口就是交换机上插网线的插口。\n\n端口名称：给插口写一个方便识别的说明，不改变联网方式。\n\n网络（VLAN）：把设备分到不同网络，编号应由网络管理员提供；更改后可能需要重新获取 IP。\n\n设备地址（MAC）：网卡的地址，用于限制这个插口允许哪些设备接入。\n\n连接信息和密码在“设备与连接设置”中填写。" : PageHelp + "1. 先添加一台交换机，填写它的管理地址与连接账户。\n\n2. 点击“进入端口”，读取设备后，在左侧点选要修改的插口。\n\n3. 右侧“端口信息”改名称、网络和开关；“MAC 绑定名单”展示原有地址，勾选保留，取消勾选则在应用时移除。新增地址每行一条。\n\n4. MAC 数量分成保留、新增和移除。只用一个新地址时，先点“只用下面的新地址”，再填这个地址；最终名单就只有这一条。\n\n5. 点击“检查并应用本页修改”，核对完整名单或端口前后值，确认后软件备份、执行、检查和保存。\n\n带“练习”标记的设备只改本机模拟数据，可以放心熟悉操作。\n\n命令终端、完整端口设置在设备页“更多端口功能”中；AI 和批量草稿在右上角“工具与设置”中。";
     public ActionCommand StartEasy { get; private set; } = null!;
     public ActionCommand EasyNext { get; private set; } = null!;
     public ActionCommand EasyBack { get; private set; } = null!;

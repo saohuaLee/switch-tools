@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--qa")) Title = "网络运维工作台 · 新手操作独立验收 0.6.0";
+        if (args.Contains("--qa")) Title = "网络运维工作台 · 端口名单独立验收 0.7.0";
         var index = Array.IndexOf(args, "--workspace");
         var root = index >= 0 && args.Length > index + 1 ? Path.GetFullPath(args[index + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetOpsStudio", "data");
         workspaceRoot = root;
@@ -67,7 +67,7 @@ public partial class MainWindow : Window
         var id = viewModel.SelectedTopologyNode?.Health?.Device.Id ?? viewModel.SelectedTopologyLink?.LocalDeviceId;
         if (id is not Guid deviceId) { viewModel.Status = "请先选择一个已纳管设备或连接。"; return; }
         var port = viewModel.SelectedTopologyLink?.LocalPort; viewModel.OpenDevice.Execute(deviceId);
-        if (port is not null) { viewModel.Section = 1; foreach (var item in viewModel.Ports) item.Picked = SwitchInventory.NormalizePort(item.State.Name).Equals(SwitchInventory.NormalizePort(port), StringComparison.OrdinalIgnoreCase); }
+        if (port is not null) viewModel.WorkPort = viewModel.Ports.FirstOrDefault(item => SwitchInventory.NormalizePort(item.State.Name).Equals(SwitchInventory.NormalizePort(port), StringComparison.OrdinalIgnoreCase));
     }
     private void MonitorSettingsClick(object sender, RoutedEventArgs e)
     { if (viewModel.SelectedDevice is not null) new MonitorWindow(viewModel) { Owner = this }.ShowDialog(); }
@@ -103,7 +103,7 @@ public partial class MainWindow : Window
     private void ViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.MembershipRows)) RefreshMatrix();
-        if (e.PropertyName == nameof(MainViewModel.ReviewOpen) && viewModel.ReviewOpen) Dispatcher.BeginInvoke(() => PlanConfirmBox.Focus());
+        if (e.PropertyName == nameof(MainViewModel.ReviewOpen) && viewModel.ReviewOpen) Dispatcher.BeginInvoke(() => { if (viewModel.WorkReviewVisible) PortReviewSurface.FocusConfirmation(); else PlanConfirmBox.Focus(); });
     }
     private void RefreshMatrix()
     {

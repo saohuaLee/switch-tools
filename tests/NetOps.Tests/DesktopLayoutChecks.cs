@@ -59,6 +59,25 @@ public static class DesktopLayoutChecks
                         if (errors.Count > 0) throw new InvalidOperationException("新手页面出现绑定异常。", errors[0]);
                     }
                     var launcher = new TaskLauncherView { DataContext = vm }; Layout(launcher);
+                    vm.WorkPort = vm.Ports.First(p => p.State.Mode == PortMode.Access && !p.State.IsUplink); Layout(launcher);
+                    var formApply = (Button)launcher.FindName("ApplyPortFormButton");
+                    void CheckFormFooter()
+                    {
+                        Layout(launcher); var point = formApply.TranslatePoint(new Point(0, 0), launcher);
+                        if (point.X < 0 || point.X + formApply.ActualWidth > 780 || point.Y + formApply.ActualHeight > 430 || formApply.ActualHeight < 30) throw new InvalidOperationException("端口工作台应用按钮超出窄窗口。");
+                    }
+                    CheckFormFooter(); vm.WorkTab = 1; vm.WorkAddresses = "38-ff-59-06-1a-77"; CheckFormFooter();
+                    vm.ReviewWorkPort.Execute(null); var review = new WorkReviewView { DataContext = vm }; Layout(review);
+                    var applyForm = Descendants(review).OfType<Button>().Single(b => b.Content?.ToString() == "确认应用并保存");
+                    var reviewPoint = applyForm.TranslatePoint(new Point(0, 0), review);
+                    if (!vm.WorkReviewVisible || reviewPoint.Y + applyForm.ActualHeight > 430) throw new InvalidOperationException("完整名单审核或固定确认按钮未显示。");
+                    vm.CloseReview.Execute(null);
+                    vm.WorkAutomaticMaximum = false; vm.WorkMaximum = "0"; vm.ReviewWorkPort.Execute(null); CheckFormFooter();
+                    var fixMaximum = (Button)launcher.FindName("FixedMacMaximumButton"); var fixPoint = fixMaximum.TranslatePoint(new Point(0, 0), launcher);
+                    if (!vm.WorkHasError || fixMaximum.ActualHeight < 24 || fixPoint.Y + fixMaximum.ActualHeight > 430) throw new InvalidOperationException("数量有误时自动修正入口不可见。");
+                    vm.AutomaticWorkMaximum.Execute(null);
+                    var network = new NetworkWorkspaceView { DataContext = vm }; vm.CreateWorkNetwork.Execute(null); Layout(network);
+                    var history = new HistoryWorkspaceView { DataContext = vm }; Layout(history);
                     var wizard = new EasyWorkflowView { DataContext = vm };
                     void CheckFooter()
                     {
@@ -81,11 +100,15 @@ public static class DesktopLayoutChecks
                     if (applyPosition.Y + apply.ActualHeight > 430 || applyPosition.X + apply.ActualWidth > 780) throw new InvalidOperationException("确认页执行按钮不可见。");
                     vm.ExitEasy.Execute(null);
                     var add = new AddDeviceWindow(vm); if (((CheckBox)add.FindName("SimulationBox")).IsChecked == true) throw new InvalidOperationException("添加设备不能默认成为练习设备。");
-                    var setup = (TabControl)add.FindName("SetupPages"); Layout((FrameworkElement)add.Content);
-                    var nameInput = (TextBox)add.FindName("DeviceName");
-                    if (setup.SelectedContent is null || nameInput.ActualHeight < 30 || nameInput.ActualWidth < 100) throw new InvalidOperationException("添加设备首步内容没有实际显示。");
-                    setup.SelectedIndex = 1; Layout((FrameworkElement)add.Content);
-                    if (((TextBox)add.FindName("UsernameBox")).ActualHeight < 30) throw new InvalidOperationException("连接账户步骤没有实际显示。");
+                    Layout((FrameworkElement)add.Content);
+                    var nameInput = (TextBox)add.FindName("DeviceName"); var userInput = (TextBox)add.FindName("UsernameBox");
+                    if (nameInput.ActualHeight < 30 || nameInput.ActualWidth < 100 || userInput.ActualHeight < 30 || userInput.ActualWidth < 100)
+                        throw new InvalidOperationException("添加设备的资料与账户未在同一表单实际显示。");
+                    var addSave = (Button)add.FindName("SaveDeviceButton"); var savePosition = addSave.TranslatePoint(new Point(), (FrameworkElement)add.Content);
+                    if (savePosition.Y + addSave.ActualHeight > 430) throw new InvalidOperationException("添加设备的保存按钮超出窄窗口。");
+                    var monitor = new MonitorWindow(vm); Layout((FrameworkElement)monitor.Content);
+                    if (((TextBox)monitor.FindName("UsernameBox")).ActualHeight < 30) throw new InvalidOperationException("监控账户没有显示。");
+                    monitor.Close();
                     add.Close(); var import = new ImportDevicesWindow(vm); Layout((FrameworkElement)import.Content); import.Close();
                 }
                 catch (Exception ex) { failure = ex; }

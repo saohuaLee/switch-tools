@@ -13,20 +13,21 @@ public sealed partial class MainViewModel
     public bool IncludeSavedDrafts { get => includeSavedDrafts; set { if (Set(ref includeSavedDrafts, value)) InvalidatePlan(); } }
     public bool TaskLanding { get => taskLanding; set { if (Set(ref taskLanding, value)) NotifyTask(); } }
     public bool TaskFormVisible => !TaskLanding;
+    public int WorkspaceArea => TaskLanding ? -1 : Section;
     public bool NeedsTaskRead => !TaskLanding && Section is 1 or 2 or 6 && !CanConfigure;
     public bool TaskContentVisible => !TaskLanding && !NeedsTaskRead;
-    public bool ConnectionControlsVisible => !EasyActive && (!CanConfigure || Section == 4);
-    public string TaskTitle => Section switch { 1 => "修改端口配置", 2 => "管理 VLAN", 3 => "备份与操作记录", 4 => "手动命令终端", 6 => "绑定 / 更换 MAC 地址", _ => "查看运行状态" };
+    public bool ConnectionControlsVisible => !EasyActive && !TaskLanding && (!CanConfigure || Section == 4);
+    public string TaskTitle => Section switch { 1 => "高级端口配置", 2 => "网络（VLAN）", 3 => "备份与操作记录", 4 => "手动命令终端", 6 => "高级绑定与静态转发", 7 => "VLAN 完整设置与成员矩阵", _ => "查看运行状态" };
     public string TaskInstructions => Section switch
     {
         1 => "先点选要修改的端口，再点“编辑所选端口”；填完后直接审核并执行。",
-        2 => "选择创建、重命名或删除 VLAN，填写编号与名称，然后直接审核并执行。",
-        3 => "点击“备份当前配置”保存快照，选择下方记录查看内容与操作结果。",
+        2 => "在左侧选择网络，再修改名称或删除；新网络点击“创建网络”。",
+        3 => "点击“立即备份当前配置”保存副本；在下方查看备份和每次操作的结果。",
         4 => "先连接终端，再输入厂商命令；手动命令会直接执行，请核对目标设备。",
         6 => "先选目标端口，再输入一条或多条 MAC；更换时从当前绑定中选择旧地址。",
         _ => "查看设备当前的监控指标、堆叠成员及最近读取的配置。"
     };
-    public string WorkflowSteps => TaskLanding ? "① 选择设备  →  ② 选择要做的事  →  ③ 填写配置  →  ④ 审核执行" : $"当前设备：{SelectedDevice?.Name}  /  {TaskTitle}";
+    public string WorkflowSteps => TaskLanding ? "选择端口 → 填写修改 → 核对并应用" : $"当前设备：{SelectedDevice?.Name}  /  {TaskTitle}";
     public string LastResult { get => lastResult; private set { Set(ref lastResult, value); Changed(nameof(HasLastResult)); } }
     public bool HasLastResult => LastResult.Length > 0;
     public string ReviewScope => !reviewIncludesCurrent ? $"本次审核本机已存的 {reviewedDraftIds.Count} 组批量草稿，下面逐项列出；尚未下发。" : reviewedDraftIds.Count > 0 ? $"本次审核包含当前填写内容及明确选入的 {reviewedDraftIds.Count} 组批量草稿。" : "本次只修改当前操作，不包含其他批量草稿。确认前不会修改设备。";
@@ -40,7 +41,7 @@ public sealed partial class MainViewModel
     private void InitializeGuidedWorkflow()
     {
         ChooseTask = new(p => { ResetEasy(); Section = int.Parse(p?.ToString() ?? "0"); TaskLanding = false; LastResult = ""; NotifyTask(); }, () => !IsApplying && !ReviewOpen);
-        BackToTasks = new(_ => { EditorOpen = false; TaskLanding = true; }, () => !IsApplying && !ReviewOpen);
+        BackToTasks = new(_ => { ResetEasy(); EditorOpen = false; TaskLanding = true; }, () => !IsApplying && !ReviewOpen);
         ReviewPortOperation = new(_ => Guard(() => ReviewOperation(BuildPortRequest())), () => CanPreviewPorts && Ready);
         ReviewVlanOperation = new(_ => Guard(() => ReviewOperation(BuildVlanRequest())), () => CanConfigure && Ready && VlanValidation.Length == 0);
         ReviewMacOperation = new(_ => RunMacEditorAction(() => { if (!string.IsNullOrWhiteSpace(MacPasteText)) ImportMacDrafts(); NormalizeMacDrafts(); ReviewOperation(BuildMacRequest()); }), () => CanConfigure && Ready && (MacRows.Count > 0 || !string.IsNullOrWhiteSpace(MacPasteText) || !string.IsNullOrWhiteSpace(MacBatch)));
@@ -51,7 +52,7 @@ public sealed partial class MainViewModel
     private void NotifyTask()
     {
         if (Section == 6 && CanConfigure && !PortNames.Contains(MacPastePort)) MacPastePort = Ports.FirstOrDefault(p => p.Picked)?.State.Name ?? Ports.FirstOrDefault(p => p.State.Mode == PortMode.Access)?.State.Name ?? "";
-        foreach (var name in new[] { nameof(TaskFormVisible), nameof(TaskTitle), nameof(TaskInstructions), nameof(NeedsTaskRead), nameof(TaskContentVisible), nameof(ConnectionControlsVisible), nameof(LegacyTaskReadVisible), nameof(LegacyTaskContentVisible), nameof(LegacyTaskHeadingVisible), nameof(WorkflowSteps), nameof(ReviewScope), nameof(MacVisibleBindings), nameof(HasMacVisibleBindings) }) Changed(name);
+        foreach (var name in new[] { nameof(TaskFormVisible), nameof(WorkspaceArea), nameof(TaskTitle), nameof(TaskInstructions), nameof(NeedsTaskRead), nameof(TaskContentVisible), nameof(ConnectionControlsVisible), nameof(LegacyTaskReadVisible), nameof(LegacyTaskContentVisible), nameof(LegacyTaskHeadingVisible), nameof(WorkflowSteps), nameof(ReviewScope), nameof(MacVisibleBindings), nameof(HasMacVisibleBindings) }) Changed(name);
         RefreshGuidedCommands();
     }
     private void RefreshGuidedCommands() { foreach (var command in new[] { ChooseTask, BackToTasks, ReviewPortOperation, ReviewVlanOperation, ReviewMacOperation, ReviewDeleteMacOperation, BindSelectedPorts }) command?.Refresh(); }

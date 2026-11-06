@@ -88,7 +88,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         PreviewPorts = new(_ => Guard(() => ShowPlan(BuildPortRequest())), () => CanPreviewPorts);
         PreviewVlan = new(_ => Guard(() => ShowPlan(BuildVlanRequest())), () => CanConfigure && Ready && VlanValidation.Length == 0);
         ApplyPlan = new(_ => _ = RunAsync("执行变更", ApplyAsync), () => Ready && plan is not null && PlanConfirmed && (plan.IsSimulation || LiveRiskAccepted));
-        CloseReview = new(_ => ReviewOpen = false, () => !IsApplying);
+        CloseReview = new(_ => InvalidatePlan(), () => !IsApplying);
         TogglePort = new(p => { if (p is PortItem port) port.Picked = !port.Picked; }, () => CanConfigure);
         SelectAllPorts = new(_ => SelectPorts(p => !p.State.IsUplink && p.State.Mode == PortMode.Access), () => CanConfigure);
         ClearSelection = new(_ => SelectPorts(_ => false), () => Ports.Any(p => p.Picked));
@@ -333,7 +333,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string PlanTitle => plan is null ? "变更审核" : $"{SelectedDevice?.Name} · {plan.Differences.Length} 项变更";
     public bool IsLivePlan => plan?.IsSimulation == false;
     private bool reviewOpen;
-    public bool ReviewOpen { get => reviewOpen; set { Set(ref reviewOpen, value); Changed(nameof(ShowLegacyReview)); Changed(nameof(CanOpenAdvancedTools)); RefreshWorkbenchCommands(); } }
+    public bool ReviewOpen { get => reviewOpen; set { Set(ref reviewOpen, value); Changed(nameof(ShowLegacyReview)); Changed(nameof(CanOpenAdvancedTools)); RefreshWorkbenchCommands(); NotifyPortWorkspace(); } }
     private bool planConfirmed, liveRiskAccepted, saveAfterVerify = true;
     public bool PlanConfirmed { get => planConfirmed; set { Set(ref planConfirmed, value); RefreshCommands(); } }
     public bool LiveRiskAccepted { get => liveRiskAccepted; set { Set(ref liveRiskAccepted, value); RefreshCommands(); } }
@@ -346,11 +346,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
         ReviewOpen = true; Status = "变更尚未下发，请审核差异和风险。"; RefreshCommands();
     }
     private void InvalidatePlan()
-    { engine?.Invalidate(); plan = null; NotifyPlan(); ReviewOpen = false; PlanConfirmed = false; LiveRiskAccepted = false; }
+    { engine?.Invalidate(); plan = null; workReview = false; NotifyPlan(); ReviewOpen = false; PlanConfirmed = false; LiveRiskAccepted = false; }
     private async Task ApplyAsync()
     {
         if (plan is null) throw new InvalidOperationException("计划已失效，请重新预览。");
-        var selectedPlan = plan; var device = RequireDevice(); var profile = RequireProfile(); IsApplying = true;
+        var selectedPlan = plan; var device = RequireDevice(); var profile = RequireProfile(); var wasPortForm = workReview; IsApplying = true;
         try
         {
             if (selectedPlan.IsSimulation) { engine.ApplySimulation(selectedPlan.Id, PlanConfirmed); Status = "模拟下发、自动备份和回读验证完成。启动配置保存仅在真实设备执行。"; }
@@ -365,11 +365,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
             foreach (var item in PendingChanges.Where(p => reviewedDraftIds.Contains(p.Id)).ToArray()) PendingChanges.Remove(item);
             if (!PendingChanges.Any(p => p.DeviceId == device.Id)) queueBaselines.Remove(device.Id);
             MacRows.Clear(); NotifyQueue();
-            EditorOpen = false; LastResult = Status;
-            SaveDraft(); RefreshCurrent(); InvalidatePlan();
+            EditorOpen = false; LastResult = wasPortForm ? "" : Status;
+            ResetPortFormAfterApply(wasPortForm); SaveDraft(); RefreshCurrent(); InvalidatePlan();
             FinishEasyOperation(Status, false);
+            FinishPortForm(Status, false, wasPortForm);
         }
-        catch (Exception ex) { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } FinishEasyOperation(Error(ex), true); throw; }
+        catch (Exception ex) { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } FinishEasyOperation(Error(ex), true); FinishPortForm(Error(ex), true, wasPortForm); throw; }
         finally { IsApplying = false; }
     }
 
@@ -386,7 +387,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     private void RefreshCurrent(bool preserve = true)
     {
-        if (preserve) SaveDraft(); loading = true; Ports.Clear(); Vlans.Clear(); MacBindings.Clear();
+        BeginPortRefresh(); if (preserve) SaveDraft(); loading = true; Ports.Clear(); Vlans.Clear(); MacBindings.Clear();
         if (SelectedDevice is not null)
         {
             var state = workspace.GetState(SelectedDevice.Id);
@@ -395,7 +396,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             foreach (var v in state?.Vlans ?? []) Vlans.Add(v);
             foreach (var b in state?.MacBindings ?? []) { var item = new MacItem(b, state?.PortSecurity?.SingleOrDefault(s => s.PortName == b.PortName)); item.PropertyChanged += (_, _) => { InvalidatePlan(); RefreshCommands(); RefreshWorkbenchCommands(); }; MacBindings.Add(item); }
         }
-        loading = false; RestoreDraft(); RefreshHistory(); Changed(nameof(MembershipRows)); RefreshAll();
+        loading = false; RestoreDraft(); RefreshHistory(); EndPortRefresh(); Changed(nameof(MembershipRows)); RefreshAll();
     }
     public void RefreshWorkspace() { var id = SelectedDevice?.Id; Devices.Clear(); foreach (var d in workspace.GetDevices()) Devices.Add(d); selectedDevice = null; SelectedDevice = Devices.FirstOrDefault(d => d.Id == id && !d.Archived) ?? Devices.FirstOrDefault(d => !d.Archived); Changed(nameof(FilteredDevices)); RefreshObservability(); }
     public void SaveDevice(Device device, string username, string password, string privateKey, ConnectionProfile profile, bool replaceSecret)
@@ -454,6 +455,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         workspace.AddSnapshot(new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, device.IsSimulation ? "手动模拟备份" : $"{profile.ProtocolLabel} 只读备份", content));
         workspace.AddAudit(new(Guid.NewGuid(), device.Id, DateTimeOffset.UtcNow, "配置备份", "已加密保存"));
         if (SelectedDevice?.Id == device.Id) RefreshHistory(); Status = "备份已保存，端口选择和编辑草稿保持不变。";
+        if (IsDeviceWorkspace && !EasyActive) { workNotice = "当前配置已备份到本机。点击下方记录查看，交换机配置未改变。"; workNoticeFailed = false; NotifyPortWorkspace(); }
     }
     private void Compare()
     {
@@ -556,11 +558,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         if (Busy) return; Busy = true; Operation = name; operationCancellation = new();
         try { await action(); } catch (OperationCanceledException) { Status = "操作取消或超时；涉及真实下发时请检查设备是否部分生效。"; if (EasyActive && EasyStep != 4) { easyError = Status; NotifyEasy(); } }
-        catch (Exception ex) { Status = Error(ex); if (EasyActive && EasyStep != 4) { easyError = Status; NotifyEasy(); } }
+        catch (Exception ex) { Status = Error(ex); if (EasyActive && EasyStep != 4) { easyError = Status; NotifyEasy(); } else if (IsDeviceWorkspace && (TaskLanding || Section is 2 or 3)) { workNotice = Status; workNoticeFailed = true; NotifyPortWorkspace(); } }
         finally { operationCancellation.Dispose(); operationCancellation = null; Busy = false; Operation = ""; RefreshAll(); }
     }
     private static string Error(Exception ex) => ex is ArgumentException or InvalidOperationException or NotSupportedException ? ex.Message : "操作未完成，请检查连接、认证、权限或设备兼容性。敏感原文未写入日志。";
-    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); RefreshGuidedCommands(); NotifyEasy(); }
+    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); RefreshGuidedCommands(); NotifyEasy(); NotifyPortWorkspace(); }
     private void RefreshAll()
     { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(ReadCurrentLabel), nameof(NextStepHint), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans), nameof(EasyPorts) }) Changed(name); RefreshCommands(); }
     public void Dispose() { operationCancellation?.Cancel(); terminalCancellation?.Cancel(); if (terminal is not null) _ = terminal.DisposeAsync(); }
