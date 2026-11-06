@@ -178,7 +178,7 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
         var ports = state.Ports.Select(p => request.Ports?.Contains(p.Name) == true ? p with
         { Mode = request.Mode ?? p.Mode, Pvid = request.Pvid ?? p.Pvid, TaggedVlans = request.Mode == PortMode.Access ? [] : request.TaggedVlans?.Distinct().Order().ToArray() ?? p.TaggedVlans, Enabled = request.Enabled ?? p.Enabled, Description = request.Description ?? p.Description } : p).ToArray();
         var securityPorts = MacRules.SecurityChanges(request);
-        ports = ports.Select(p => securityPorts.Contains(p.Name) ? p with { Enabled = true } : p).ToArray();
+        ports = ports.Select(p => securityPorts.Contains(p.Name) && !request.MigratePortSecurity ? p with { Enabled = true } : p).ToArray();
         return state with { Revision = state.Revision + 1, Ports = ports, Vlans = vlans };
     }
     private static PlanDiff[] Differences(DeviceState before, DeviceState after)
@@ -207,7 +207,9 @@ public sealed partial class ChangeEngine(IWorkspace workspace, IDriverRegistry d
     {
         var ports = requests.SelectMany(MacRules.SecurityChanges).Distinct().ToArray();
         if (ports.Length == 0) yield break;
-        yield return "端口安全绑定会先 shutdown（关闭端口），删除旧 MAC 并绑定新 MAC，最后 no shutdown（启用端口，即使原先已禁用）；回读验证通过后自动写入启动配置。最后一条绑定删除后关闭端口安全。";
+        yield return requests.Any(r => r.MigratePortSecurity)
+            ? "更换网络会在同一次关口期间迁移现有静态 MAC 绑定，保留原上限、违规动作及原管理启停状态；回读验证通过后保存。连接终端会暂时断网，可能需要重新获取 IP。"
+            : "端口安全绑定会先 shutdown（关闭端口），删除旧 MAC 并绑定新 MAC，最后 no shutdown（启用端口，即使原先已禁用）；回读验证通过后自动写入启动配置。最后一条绑定删除后关闭该功能。";
         foreach (var p in MacRules.Security(target).Where(p => ports.Contains(p.PortName)))
         {
             if (p.Violation == "shutdown") yield return $"{p.PortName} 违规动作为 shutdown：违规会使整个端口进入错误禁用状态，需要恢复后才能通信。";

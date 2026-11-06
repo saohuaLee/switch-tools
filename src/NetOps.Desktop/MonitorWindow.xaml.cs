@@ -13,7 +13,7 @@ public partial class MonitorWindow : Window
     public MonitorWindow(MainViewModel vm)
     {
         InitializeComponent(); this.vm = vm; original = vm.CurrentMonitorProfile; DeviceLabel.Text = vm.SelectedDevice!.Name;
-        ProtocolBox.ItemsSource = new[] { new Choice<MonitorProtocol>(MonitorProtocol.SnmpV3, "SNMPv3 · 认证与加密"), new(MonitorProtocol.SnmpV2, "SNMPv2c · 只读 community"), new(MonitorProtocol.Ssh, "SSH · 使用设备连接档案") };
+        ProtocolBox.ItemsSource = new[] { new Choice<MonitorProtocol>(MonitorProtocol.SnmpV3, "专用监控账户（SNMPv3，需管理员提供）"), new(MonitorProtocol.SnmpV2, "旧式监控口令（SNMPv2c，只用于可信网络）"), new(MonitorProtocol.Ssh, "使用已有登录连接（SSH，只读）") };
         ProtocolBox.SelectedIndex = (int)original.Protocol; AuthBox.SelectedIndex = 0;
         EnabledBox.IsChecked = original.Enabled; MaintenanceBox.IsChecked = original.Maintenance; PortBox.Text = original.Port.ToString(); IntervalBox.Text = original.IntervalSeconds.ToString(); FailureBox.Text = original.FailureThreshold.ToString();
         CpuBox.Text = original.CpuThreshold.ToString(CultureInfo.InvariantCulture); MemoryBox.Text = original.MemoryThreshold.ToString(CultureInfo.InvariantCulture); TemperatureBox.Text = original.TemperatureThreshold?.ToString(CultureInfo.InvariantCulture) ?? ""; AlarmSamplesBox.Text = original.AlarmSamples.ToString();

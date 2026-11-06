@@ -92,9 +92,10 @@ await AsyncTest("SSH 在联网前拒绝缺少指纹的真实设备", async () =>
 
 await WorkflowChecks.Run(root, Test, AsyncTest);
 await MacBindingChecks.Run(root, Test, AsyncTest);
+await BeginnerChecks.Run(root, Test, AsyncTest);
 await ImportChecks.Run(root, Test, AsyncTest);
 await ObservabilityChecks.Run(root, Test, AsyncTest);
-DesktopLayoutChecks.Run(device, Test);
+DesktopLayoutChecks.Run(device, root, Test);
 Console.WriteLine($"\n验证结果：通过 {passed} 项，失败 {failed} 项；仅使用临时数据、会话夹具和本机回环服务，未连接真实设备或 AI 服务。");
 var resolved = Path.GetFullPath(root);
 if (resolved.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(resolved).StartsWith("netops-tests-", StringComparison.Ordinal)) Directory.Delete(resolved, true);

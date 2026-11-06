@@ -25,12 +25,13 @@ public sealed class ActionCommand(Action<object?> action, Func<bool>? enabled = 
     public void Refresh() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }
 public sealed record Choice<T>(T Value, string Label) { public override string ToString() => Label; }
-public sealed class PortItem(PortState state, bool showFullName = false) : Observable
+public sealed class PortItem(PortState state, bool showFullName = false, int? memberId = null) : Observable
 {
     public PortState State { get; } = state;
     private bool picked;
     public bool Picked { get => picked; set { if (Set(ref picked, value)) { Changed(nameof(Fill)); Changed(nameof(SelectionMark)); } } }
     public string Number => State.Name.Split('/').Last();
+    public string FriendlyName => memberId is int id ? $"端口 {Number}（交换机 {id}）" : $"端口 {Number}";
     public string TileLabel => showFullName ? State.Name.Replace("GigabitEthernet", "GE", StringComparison.Ordinal).Replace("FastEthernet", "FE", StringComparison.Ordinal) : Number;
     public string Fill => Picked ? "#DFEBFF" : "#F8FAFC";
     public string SelectionMark => Picked ? "✓" : "";
@@ -237,7 +238,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool portEnabled;
     public bool PortEnabled { get => portEnabled; set { if (Set(ref portEnabled, value)) { if (!loading) ApplyEnabled = true; DraftChanged(); } } }
     public string PortRange { get; set; } = "1-8";
-    public int ModifiedFieldCount => new[] { ApplyMode, ApplyPvid, ApplyAllowed && ShowAllowed, ApplyEnabled, ApplyDescription }.Count(v => v);
+    private (bool Mode, bool Network, bool Allowed, bool Enabled, bool Description) EffectivePortFields()
+    {
+        var selected = Ports.Where(p => p.Picked).Select(p => p.State).ToArray();
+        bool allowed = ApplyAllowed && ShowAllowed;
+        if (allowed) { try { var ids = VlanRanges.Parse(AllowedVlans); allowed = selected.Any(p => !p.TaggedVlans.Order().SequenceEqual(ids.Order())); } catch (ArgumentException) { } }
+        return (ApplyMode && selected.Any(p => p.Mode != SelectedMode.Value),
+            ApplyPvid && (!int.TryParse(Pvid, out var id) || selected.Any(p => p.Pvid != id)), allowed,
+            ApplyEnabled && selected.Any(p => p.Enabled != PortEnabled), ApplyDescription && selected.Any(p => p.Description != PortDescription.Trim()));
+    }
+    public int ModifiedFieldCount { get { var f = EffectivePortFields(); return new[] { f.Mode, f.Network, f.Allowed, f.Enabled, f.Description }.Count(v => v); } }
     public string PortValidation
     {
         get
@@ -254,19 +264,21 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ChangeRequest BuildPortRequest()
     {
         if (!CanConfigure) throw new InvalidOperationException(CapabilityHint);
-        var id = ApplyPvid ? ParseInt(Pvid, "PVID") : (int?)null;
-        return new(CreateVlanId: CreateInlineVlan && ApplyPvid ? id : null, VlanName: CreateInlineVlan && ApplyPvid ? NewVlanName.Trim() : null,
-            Ports: Ports.Where(p => p.Picked).Select(p => p.State.Name).ToArray(), Mode: ApplyMode ? SelectedMode.Value : null, Pvid: id,
-            TaggedVlans: ApplyAllowed && ShowAllowed ? VlanRanges.Parse(AllowedVlans) : null, Enabled: ApplyEnabled ? PortEnabled : null, Description: ApplyDescription ? PortDescription.Trim() : null);
+        var fields = EffectivePortFields();
+        var id = fields.Network ? ParseInt(Pvid, "VLAN 编号") : (int?)null;
+        return new(CreateVlanId: CreateInlineVlan && fields.Network ? id : null, VlanName: CreateInlineVlan && fields.Network ? NewVlanName.Trim() : null,
+            Ports: Ports.Where(p => p.Picked).Select(p => p.State.Name).ToArray(), Mode: fields.Mode ? SelectedMode.Value : null, Pvid: id,
+            TaggedVlans: fields.Allowed ? VlanRanges.Parse(AllowedVlans) : null, Enabled: fields.Enabled ? PortEnabled : null, Description: fields.Description ? PortDescription.Trim() : null);
     }
     private void DraftChanged()
     {
         if (loading) return;
         InvalidatePlan(); SaveDraft(); Changed(nameof(ModifiedFieldCount)); Changed(nameof(PortValidation)); Changed(nameof(ShowAllowed)); RefreshCommands();
     }
-    private void SelectionChanged()
+    private void SelectionChanged(PortItem? changed = null)
     {
         if (loading) return;
+        EnforceEasySelection(changed);
         InvalidatePlan(); FillCurrentValues(); SaveDraft(); RefreshAll();
     }
     private void FillCurrentValues()
@@ -321,7 +333,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string PlanTitle => plan is null ? "变更审核" : $"{SelectedDevice?.Name} · {plan.Differences.Length} 项变更";
     public bool IsLivePlan => plan?.IsSimulation == false;
     private bool reviewOpen;
-    public bool ReviewOpen { get => reviewOpen; set { Set(ref reviewOpen, value); RefreshWorkbenchCommands(); } }
+    public bool ReviewOpen { get => reviewOpen; set { Set(ref reviewOpen, value); Changed(nameof(ShowLegacyReview)); Changed(nameof(CanOpenAdvancedTools)); RefreshWorkbenchCommands(); } }
     private bool planConfirmed, liveRiskAccepted, saveAfterVerify = true;
     public bool PlanConfirmed { get => planConfirmed; set { Set(ref planConfirmed, value); RefreshCommands(); } }
     public bool LiveRiskAccepted { get => liveRiskAccepted; set { Set(ref liveRiskAccepted, value); RefreshCommands(); } }
@@ -329,6 +341,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private void ShowPlan(ChangeRequest request)
     {
         plan = engine.Preview(RequireDevice(), request); reviewIncludesCurrent = true; PlanConfirmed = false; LiveRiskAccepted = false;
+        reviewedDraftIds.Clear();
         NotifyPlan();
         ReviewOpen = true; Status = "变更尚未下发，请审核差异和风险。"; RefreshCommands();
     }
@@ -349,12 +362,14 @@ public sealed partial class MainViewModel : Observable, IDisposable
             }
             loading = true; ApplyMode = ApplyPvid = ApplyAllowed = ApplyEnabled = ApplyDescription = CreateInlineVlan = false; loading = false;
             if (selectedPlan.Request.AddMacBindings?.Length > 0) MacBatch = "";
-            foreach (var item in PendingChanges.Where(p => p.DeviceId == device.Id).ToArray()) PendingChanges.Remove(item);
-            queueBaselines.Remove(device.Id); MacRows.Clear(); NotifyQueue();
+            foreach (var item in PendingChanges.Where(p => reviewedDraftIds.Contains(p.Id)).ToArray()) PendingChanges.Remove(item);
+            if (!PendingChanges.Any(p => p.DeviceId == device.Id)) queueBaselines.Remove(device.Id);
+            MacRows.Clear(); NotifyQueue();
             EditorOpen = false; LastResult = Status;
             SaveDraft(); RefreshCurrent(); InvalidatePlan();
+            FinishEasyOperation(Status, false);
         }
-        catch { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } throw; }
+        catch (Exception ex) { if (!device.IsSimulation) { prepared.Remove(device.Id); InvalidatePlan(); } FinishEasyOperation(Error(ex), true); throw; }
         finally { IsApplying = false; }
     }
 
@@ -376,7 +391,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         {
             var state = workspace.GetState(SelectedDevice.Id);
             var multiple = state?.Ports.Select(p => p.Name[..Math.Max(0, p.Name.LastIndexOf('/'))]).Distinct().Count() > 1;
-            foreach (var p in state?.Ports ?? []) { var item = new PortItem(p, multiple); item.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(PortItem.Picked)) SelectionChanged(); }; Ports.Add(item); }
+            foreach (var p in state?.Ports ?? []) { var item = new PortItem(p, multiple, SwitchInventory.MemberId(p.Name, state?.StackMembers ?? [])); item.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(PortItem.Picked)) SelectionChanged(item); }; Ports.Add(item); }
             foreach (var v in state?.Vlans ?? []) Vlans.Add(v);
             foreach (var b in state?.MacBindings ?? []) { var item = new MacItem(b, state?.PortSecurity?.SingleOrDefault(s => s.PortName == b.PortName)); item.PropertyChanged += (_, _) => { InvalidatePlan(); RefreshCommands(); RefreshWorkbenchCommands(); }; MacBindings.Add(item); }
         }
@@ -540,13 +555,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task RunAsync(string name, Func<Task> action)
     {
         if (Busy) return; Busy = true; Operation = name; operationCancellation = new();
-        try { await action(); } catch (OperationCanceledException) { Status = "操作取消或超时；涉及真实下发时请检查设备是否部分生效。"; }
-        catch (Exception ex) { Status = Error(ex); }
+        try { await action(); } catch (OperationCanceledException) { Status = "操作取消或超时；涉及真实下发时请检查设备是否部分生效。"; if (EasyActive && EasyStep != 4) { easyError = Status; NotifyEasy(); } }
+        catch (Exception ex) { Status = Error(ex); if (EasyActive && EasyStep != 4) { easyError = Status; NotifyEasy(); } }
         finally { operationCancellation.Dispose(); operationCancellation = null; Busy = false; Operation = ""; RefreshAll(); }
     }
     private static string Error(Exception ex) => ex is ArgumentException or InvalidOperationException or NotSupportedException ? ex.Message : "操作未完成，请检查连接、认证、权限或设备兼容性。敏感原文未写入日志。";
-    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); RefreshGuidedCommands(); }
+    private void RefreshCommands() { foreach (var command in commands ?? []) command.Refresh(); RefreshWorkbenchCommands(); RefreshGuidedCommands(); NotifyEasy(); }
     private void RefreshAll()
-    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(ReadCurrentLabel), nameof(NextStepHint), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans) }) Changed(name); RefreshCommands(); }
+    { foreach (var name in new[] { nameof(DeviceSummary), nameof(InventorySummary), nameof(StackMembers), nameof(PortGroups), nameof(CapabilityHint), nameof(SupportsConfiguration), nameof(CanConfigure), nameof(IsInteractiveProfile), nameof(WorkflowLabel), nameof(SelectionLabel), nameof(SelectionDetails), nameof(ModifiedFieldCount), nameof(PortValidation), nameof(VlanValidation), nameof(MacValidation), nameof(ShowAllowed), nameof(CanPreviewPorts), nameof(ContextPreview), nameof(Ready), nameof(ConnectionStage), nameof(ReadCurrentLabel), nameof(NextStepHint), nameof(PortNames), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(AvailableVlans), nameof(EasyPorts) }) Changed(name); RefreshCommands(); }
     public void Dispose() { operationCancellation?.Cancel(); terminalCancellation?.Cancel(); if (terminal is not null) _ = terminal.DisposeAsync(); }
 }

@@ -44,6 +44,23 @@ public static partial class MacRules
         if (settings.Select(s => s.PortName).Distinct().Count() != settings.Length) throw new ArgumentException("同一端口只能设置一组端口安全参数。");
         if (settings.Any(s => s.Maximum < 1 || s.Violation is not ("shutdown" or "restrict" or "protect")))
             throw new ArgumentException("MAC 数量上限必须为正整数；违规动作只能选择 shutdown、restrict 或 protect。");
+        if (request.MigratePortSecurity)
+        {
+            if (request.Pvid is null || request.Ports?.Length is not > 0 || request.Mode is not null || request.Enabled is not null || request.Description is not null || request.TaggedVlans is not null || SecurityChanges(request).Length == 0)
+                throw new ArgumentException("安全绑定迁移仅允许更换接入口所属网络，并保留原启停状态及安全策略。");
+            var expected = old.Where(b => b.Kind == MacBindingKind.SecureSource && request.Ports.Contains(b.PortName)).ToArray();
+            var wanted = expected.Select(b => b with { VlanId = request.Pvid.Value }).ToArray();
+            if (!settings.Select(s => s.PortName).Order().SequenceEqual(expected.Select(b => b.PortName).Distinct().Order()))
+                throw new ArgumentException("迁移安全策略必须与所选端口的原绑定完全对应，不能夹带其他端口。");
+            if (!remove.OrderBy(Key).SequenceEqual(expected.OrderBy(Key)) || !add.OrderBy(Key).SequenceEqual(wanted.OrderBy(Key)))
+                throw new ArgumentException("更换网络必须完整保留所选端口的全部静态安全绑定，不能同时更换地址或遗漏绑定。");
+            foreach (var name in SecurityChanges(request))
+            {
+                var policy = Security(state).SingleOrDefault(p => p.PortName == name);
+                if (policy is null || !policy.Enabled || settings.SingleOrDefault(s => s.PortName == name) != new PortSecuritySettings(name, policy.Maximum, policy.Violation))
+                    throw new ArgumentException("更换网络必须保留原有 MAC 数量上限和违规动作。");
+            }
+        }
         var target = TargetBindings(state, request);
         if (target.GroupBy(Key).Any(g => g.Count() > 1)) throw new ArgumentException("同一个 MAC 与 VLAN 只能绑定一个端口和一种用途；迁移请先删除旧绑定。");
         var targetState = ChangeEngine.TransformPortsAndVlans(state, request);
@@ -71,7 +88,7 @@ public static partial class MacRules
             if (count > maximum) throw new ArgumentException($"{name} 最终有 {count} 条绑定，超过 MAC 数量上限 {maximum}，请提高上限或减少绑定。");
         }
         foreach (var p in Security(state).Where(p => p.Enabled))
-            if (request.Ports?.Contains(p.PortName) == true && (request.Pvid is not null || request.Mode is not null || request.TaggedVlans is not null)) throw new ArgumentException("启用端口安全时请先移除安全绑定并核对安全策略，再修改 VLAN 或模式。");
+            if (!request.MigratePortSecurity && request.Ports?.Contains(p.PortName) == true && (request.Pvid is not null || request.Mode is not null || request.TaggedVlans is not null)) throw new ArgumentException("此端口已绑定设备地址。请使用“更换端口所属网络”并选择保留绑定，或到高级设置核对安全策略。");
     }
     public static MacBinding[] ParseBatch(string text, MacBindingKind kind)
     {

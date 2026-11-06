@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--qa")) Title = "网络运维工作台 · MAC 绑定独立验收 0.5.0";
+        if (args.Contains("--qa")) Title = "网络运维工作台 · 新手操作独立验收 0.6.0";
         var index = Array.IndexOf(args, "--workspace");
         var root = index >= 0 && args.Length > index + 1 ? Path.GetFullPath(args[index + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetOpsStudio", "data");
         workspaceRoot = root;
@@ -72,7 +72,8 @@ public partial class MainWindow : Window
     private void MonitorSettingsClick(object sender, RoutedEventArgs e)
     { if (viewModel.SelectedDevice is not null) new MonitorWindow(viewModel) { Owner = this }.ShowDialog(); }
     private void ManualLinkClick(object sender, RoutedEventArgs e) => new ManualLinkWindow(viewModel) { Owner = this }.ShowDialog();
-    private void AddDeviceClick(object sender, RoutedEventArgs e) => new AddDeviceWindow(viewModel) { Owner = this }.ShowDialog();
+    private void AddDeviceClick(object sender, RoutedEventArgs e)
+    { if (new AddDeviceWindow(viewModel) { Owner = this }.ShowDialog() == true && viewModel.SelectedDevice is { } device) viewModel.OpenDevice.Execute(device.Id); }
     private void EditDeviceClick(object sender, RoutedEventArgs e)
     {
         if (viewModel.SelectedDevice is null) return;
@@ -87,15 +88,7 @@ public partial class MainWindow : Window
     }
     private void ImportClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { Title = "导入设备清单", Filter = "设备清单|*.csv;*.xlsx|CSV 文件|*.csv|Excel 工作簿|*.xlsx" };
-        if (dialog.ShowDialog(this) != true) return;
-        try
-        {
-            if (new FileInfo(dialog.FileName).Length > 2_000_000) throw new ArgumentException("设备清单文件最多 2 MB。");
-            if (Path.GetExtension(dialog.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase)) { using var stream = File.OpenRead(dialog.FileName); viewModel.ImportDevices(DeviceXlsx.Parse(stream)); }
-            else { using var reader = File.OpenText(dialog.FileName); viewModel.ImportDevices(DeviceCsv.Parse(reader)); }
-        }
-        catch (Exception ex) { viewModel.Status = ex is ArgumentException ? ex.Message : "导入失败，请检查清单格式和本地文件权限；未保存部分数据。"; }
+        new ImportDevicesWindow(viewModel) { Owner = this }.ShowDialog();
     }
     private void DiscoverClick(object sender, RoutedEventArgs e) => new DiscoveryWindow(viewModel) { Owner = this }.ShowDialog();
     private void OpenTerminalClick(object sender, RoutedEventArgs e) => viewModel.Section = 4;

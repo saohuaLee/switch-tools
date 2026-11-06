@@ -45,6 +45,7 @@ public sealed class CliPreviewDriver(Vendor vendor) : IDeviceDriver
         foreach (var b in (request.AddMacBindings ?? []).Where(b => b.Kind == MacBindingKind.StaticForwarding)) commands.Add(StaticMac(b, false));
         foreach (var port in request.Ports ?? [])
         {
+            if (request.MigratePortSecurity && MacRules.SecurityChanges(request).Contains(port)) continue;
             commands.Add($"interface {port}");
             if (request.Description is not null) commands.Add(request.Description.Length == 0 ? (IsVrp ? "undo description" : "no description") : $"description {request.Description}");
             var access = (request.Mode ?? baseline?.Ports.Single(p => p.Name == port).Mode) == PortMode.Access;
@@ -67,8 +68,11 @@ public sealed class CliPreviewDriver(Vendor vendor) : IDeviceDriver
         var securityPorts = MacRules.SecurityChanges(request);
         void RemoveSecure(string name)
         {
-            commands.Add($"interface {name}"); commands.Add("shutdown"); commands.Add("switchport mode access");
+            commands.Add($"interface {name}"); commands.Add("shutdown");
             foreach (var b in (request.RemoveMacBindings ?? []).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name)) commands.Add($"no switchport port-security mac-address {MacRules.VendorAddress(b.Address, false)}");
+            if (request.MigratePortSecurity) commands.Add("no switchport port-security");
+            commands.Add("switchport mode access");
+            if (request.MigratePortSecurity) commands.Add($"switchport access vlan {request.Pvid}");
         }
         if (securityPorts.Length > 1)
             foreach (var name in securityPorts) { RemoveSecure(name); commands.Add("exit"); }
@@ -84,7 +88,7 @@ public sealed class CliPreviewDriver(Vendor vendor) : IDeviceDriver
                 foreach (var b in (request.AddMacBindings ?? []).Where(b => b.Kind == MacBindingKind.SecureSource && b.PortName == name)) commands.Add($"switchport port-security mac-address {MacRules.VendorAddress(b.Address, false)}");
             }
             else { commands.Add("no switchport port-security"); commands.Add("no switchport port-security maximum"); commands.Add("no switchport port-security violation"); }
-            commands.Add("no shutdown");
+            if (!request.MigratePortSecurity || baseline.Ports.Single(p => p.Name == name).Enabled) commands.Add("no shutdown");
             commands.Add("exit");
         }
         commands.Add(IsVrp ? "return" : "end");

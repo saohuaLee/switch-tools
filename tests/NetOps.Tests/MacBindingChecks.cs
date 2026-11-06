@@ -138,7 +138,9 @@ public static class MacBindingChecks
             vm.ChooseTask.Execute("2"); vm.VlanId = "20"; vm.VlanName = "Office20"; vm.ReviewVlanOperation.Execute(null);
             Check(vm.ReviewOpen && vm.PendingChanges.Count == 0 && vm.PlanCommands.Contains("vlan 20")); vm.CloseReview.Execute(null);
             vm.Stage(new(CreateVlanId: 30, VlanName: "Draft30"), "创建批量草稿 VLAN"); vm.VlanId = "40"; vm.VlanName = "Office40"; vm.ReviewVlanOperation.Execute(null);
-            Check(vm.ReviewOpen && vm.PendingChanges.Count == 1 && vm.ReviewScope.Contains("1 组") && vm.PlanCommands.Contains("vlan 30") && vm.PlanCommands.Contains("vlan 40"));
+            Check(vm.ReviewOpen && vm.PendingChanges.Count == 1 && !vm.PlanCommands.Contains("vlan 30") && vm.PlanCommands.Contains("vlan 40"));
+            vm.CloseReview.Execute(null); vm.IncludeSavedDrafts = true; vm.ReviewVlanOperation.Execute(null);
+            Check(vm.ReviewOpen && vm.ReviewScope.Contains("1 组") && vm.PlanCommands.Contains("vlan 30") && vm.PlanCommands.Contains("vlan 40"));
         });
         await asyncTest("直接审核执行后展示结果，清理本机草稿并保留真实设备隔离", async () =>
         {

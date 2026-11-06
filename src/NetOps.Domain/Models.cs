@@ -81,7 +81,7 @@ public sealed record ChangeRequest(int? CreateVlanId = null, string? VlanName = 
     string[]? Ports = null, PortMode? Mode = null, int? Pvid = null,
     int[]? TaggedVlans = null, bool? Enabled = null, string? Description = null,
     int? RenameVlanId = null, int? DeleteVlanId = null, MacBinding[]? AddMacBindings = null, MacBinding[]? RemoveMacBindings = null,
-    PortSecuritySettings[]? SecuritySettings = null);
+    PortSecuritySettings[]? SecuritySettings = null, bool MigratePortSecurity = false);
 public sealed record PlanDiff(string Target, string Before, string After)
 {
     public override string ToString() => $"{Target}：{Before} → {After}";

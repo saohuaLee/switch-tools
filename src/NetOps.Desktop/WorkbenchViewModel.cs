@@ -107,11 +107,11 @@ public sealed partial class MainViewModel
     public event Action? TopologyChanged;
     private void InitializeWorkbench()
     {
-        Navigate = new(p => { var target = int.Parse(p?.ToString() ?? "0"); if (target == 2) ReturnToDevices(); else Page = target; });
+        Navigate = new(p => { var target = int.Parse(p?.ToString() ?? "0"); if (target == 2) ReturnToDevices(); else Page = target; }, () => !IsApplying && !ReviewOpen);
         BackToDevices = new(_ => ReturnToDevices(), () => IsDeviceWorkspace && !ReviewOpen);
         ClearDeviceFilter = new(_ => { Search = ""; DeviceGroup = "全部分组"; });
-        OpenDeviceQueue = new(_ => { SelectedPending = PendingChanges.FirstOrDefault(p => p.DeviceId == SelectedDevice?.Id); Page = 4; }, () => DevicePendingCount > 0);
-        OpenDevice = new(p => { if (p is DeviceHealthRow row) SelectedDevice = Devices.First(d => d.Id == row.Device.Id); else if (p is Guid id) SelectedDevice = Devices.First(d => d.Id == id); Page = 2; DeviceFocused = true; Section = 0; TaskLanding = true; LastResult = ""; }, () => SelectedDevice is not null && !IsApplying);
+        OpenDeviceQueue = new(_ => { SelectedPending = PendingChanges.FirstOrDefault(p => p.DeviceId == SelectedDevice?.Id); Page = 4; }, () => DevicePendingCount > 0 && !ReviewOpen && !IsApplying);
+        OpenDevice = new(p => { ResetEasy(); if (p is DeviceHealthRow row) SelectedDevice = Devices.First(d => d.Id == row.Device.Id); else if (p is Guid id) SelectedDevice = Devices.First(d => d.Id == id); Page = 2; DeviceFocused = true; Section = 0; TaskLanding = true; LastResult = ""; }, () => SelectedDevice is not null && !IsApplying && !ReviewOpen);
         StagePorts = new(_ => Guard(() => { Stage(BuildPortRequest(), $"端口配置 · {Ports.Count(p => p.Picked)} 个端口"); loading = true; ApplyMode = ApplyPvid = ApplyAllowed = ApplyEnabled = ApplyDescription = CreateInlineVlan = false; loading = false; FillCurrentValues(); EditorOpen = false; NotifyQueue(); }), () => CanPreviewPorts && Ready);
         StageVlan = new(_ => Guard(() => Stage(BuildVlanRequest(), VlanAction.Label + " · VLAN " + VlanId)), () => CanConfigure && Ready && VlanValidation.Length == 0);
         StageMac = new(_ => Guard(() => { NormalizeMacDrafts(); var r = BuildMacRequest(); Stage(r, $"{SelectedMacKind.Label} · 新增 {r.AddMacBindings?.Length ?? 0} / 移除 {r.RemoveMacBindings?.Length ?? 0}"); MacRows.Clear(); MacBatch = ""; NotifyQueue(); }), () => CanConfigure && Ready && MacValidation.Length == 0);
@@ -133,17 +133,18 @@ public sealed partial class MainViewModel
         PropertyChanged += (_, e) => { if (e.PropertyName == nameof(SelectedDevice)) { foreach (var name in new[] { nameof(PageTitle), nameof(PageSubtitle), nameof(SelectedDeviceMetrics), nameof(SelectedHistory), nameof(CurrentHealth), nameof(MetricsHint), nameof(MemberHealthRows), nameof(HasMemberHealth), nameof(QueueValidation), nameof(AvailableVlans), nameof(DevicePendingCount), nameof(DeviceQueueLabel), nameof(NextStepHint) }) Changed(name); } };
         RefreshObservability();
         InitializeGuidedWorkflow();
+        InitializeEasyWorkflow();
     }
     private void AddRow(string port, string vlan, MacBinding? original = null)
     { var row = new MacDraftRow { PortName = port, Vlan = vlan, OriginalBinding = original }; row.PropertyChanged += (_, _) => MacEditorChanged(); MacRows.Add(row); }
     private int page = 2;
-    public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } } }
+    public int Page { get => page; set { if (Set(ref page, value)) { EditorOpen = false; AiOpen = false; Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); Changed(nameof(HelpTitle)); Changed(nameof(HelpText)); RefreshWorkbenchCommands(); } } }
     public string PageTitle => Page switch { 1 => "网络拓扑", 2 => DeviceFocused ? SelectedDevice?.Name ?? "设备工作区" : "设备中心", 3 => "告警与事件", 4 => "批量草稿", 5 => "系统设置", _ => "网络总览" };
     public string PageSubtitle => Page switch { 1 => "从连接关系定位设备与端口", 2 => DeviceFocused ? "设备中心 / 设备工作区" : "选择设备 → 选择操作 → 填写配置 → 审核执行", 3 => "持续异常、恢复时间和处理记录", 4 => "可选功能：把同一设备的多项配置一起审核和执行", 5 => "管理采集器、AI 服务和驱动能力", _ => "网络状态、资源趋势和需要处理的事项" };
     private bool deviceFocused;
-    public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); RefreshWorkbenchCommands(); } }
+    public bool DeviceFocused { get => deviceFocused; set { Set(ref deviceFocused, value); Changed(nameof(PageTitle)); Changed(nameof(PageSubtitle)); Changed(nameof(IsDeviceWorkspace)); Changed(nameof(HelpTitle)); Changed(nameof(HelpText)); RefreshWorkbenchCommands(); } }
     public bool IsDeviceWorkspace => Page == 2 && DeviceFocused;
-    private void ReturnToDevices() { EditorOpen = false; AiOpen = false; DeviceFocused = false; Page = 2; }
+    private void ReturnToDevices() { ResetEasy(); EditorOpen = false; AiOpen = false; DeviceFocused = false; Page = 2; }
     private DeviceHealthRow? selectedRow;
     public DeviceHealthRow? SelectedRow { get => selectedRow; set { if (Set(ref selectedRow, value) && value is not null && value.Device.Id != SelectedDevice?.Id) SelectedDevice = Devices.First(d => d.Id == value.Device.Id); } }
     public string[] PortNames => Ports.Select(p => p.State.Name).ToArray();
@@ -230,6 +231,7 @@ public sealed partial class MainViewModel
         var device = RequireDevice(); var state = workspace.GetState(device.Id)!;
         if (!queueBaselines.TryGetValue(device.Id, out var baseline) || baseline.Hash != ChangeEngine.Hash(state) || baseline.Identity != ChangeEngine.IdentityHash(device)) throw new InvalidOperationException("待提交基线已变化，请移除旧变更并重新核对。");
         plan = engine.PreviewMany(device, PendingChanges.Where(p => p.DeviceId == device.Id).Select(p => p.Request).ToArray()); reviewIncludesCurrent = false; PlanConfirmed = false; LiveRiskAccepted = false;
+        reviewedDraftIds.Clear(); reviewedDraftIds.UnionWith(PendingChanges.Where(p => p.DeviceId == device.Id).Select(p => p.Id));
         NotifyPlan();
         ReviewOpen = true; RefreshCommands();
     }
